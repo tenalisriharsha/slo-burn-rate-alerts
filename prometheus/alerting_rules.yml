@@ -1,0 +1,81 @@
+groups:
+  - name: sample-service.slo.burnrate-alerts
+    rules:
+      # Tier 1 - fast burn, pages. At this rate the full 30-day error budget
+      # is exhausted in about 2 days (~2% of the budget burned by the time
+      # this fires and ~5% by the time anyone could react).
+      - alert: SampleServiceErrorBudgetBurnFast
+        expr: |
+          sample_service:burnrate1h >= 14.4
+          and
+          sample_service:burnrate5m >= 14.4
+        for: 2m
+        labels:
+          severity: critical
+          slo: sample-service-availability
+          window: fast
+        annotations:
+          summary: "sample-service is burning its error budget >14x too fast"
+          description: >-
+            Error ratio over the last 1h AND the last 5m both exceed 14.4x the
+            allowed SLO burn rate for the 99.9% availability objective. At this
+            rate the 30-day error budget is exhausted in ~2 days. See
+            docs/runbook.md#fast-burn-page.
+
+      # Tier 2 - medium-fast burn, pages. Budget exhausted in about 5 days.
+      - alert: SampleServiceErrorBudgetBurnMediumFast
+        expr: |
+          sample_service:burnrate6h >= 6
+          and
+          sample_service:burnrate30m >= 6
+        for: 15m
+        labels:
+          severity: critical
+          slo: sample-service-availability
+          window: medium-fast
+        annotations:
+          summary: "sample-service is burning its error budget >6x too fast"
+          description: >-
+            Error ratio over the last 6h AND the last 30m both exceed 6x the
+            allowed SLO burn rate for the 99.9% availability objective. At this
+            rate the 30-day error budget is exhausted in ~5 days. See
+            docs/runbook.md#medium-fast-burn-page.
+
+      # Tier 3 - slow burn, ticket. Budget exhausted in about 10 days.
+      - alert: SampleServiceErrorBudgetBurnSlow
+        expr: |
+          sample_service:burnrate1d >= 3
+          and
+          sample_service:burnrate2h >= 3
+        for: 1h
+        labels:
+          severity: warning
+          slo: sample-service-availability
+          window: slow
+        annotations:
+          summary: "sample-service is burning its error budget 3x too fast"
+          description: >-
+            Error ratio over the last 1d AND the last 2h both exceed 3x the
+            allowed SLO burn rate for the 99.9% availability objective. At this
+            rate the 30-day error budget is exhausted in ~10 days. See
+            docs/runbook.md#slow-burn-ticket.
+
+      # Tier 4 - very slow burn, ticket. Budget exhausted right around the
+      # 30-day window, i.e. the SLO itself is at risk this period.
+      - alert: SampleServiceErrorBudgetBurnVerySlow
+        expr: |
+          sample_service:burnrate3d >= 1
+          and
+          sample_service:burnrate6h >= 1
+        for: 3h
+        labels:
+          severity: warning
+          slo: sample-service-availability
+          window: very-slow
+        annotations:
+          summary: "sample-service is on track to exhaust its 30-day error budget"
+          description: >-
+            Error ratio over the last 3d AND the last 6h both exceed the
+            allowed SLO burn rate for the 99.9% availability objective. At this
+            rate the 30-day error budget will be fully exhausted by the end of
+            the period. See docs/runbook.md#very-slow-burn-ticket.

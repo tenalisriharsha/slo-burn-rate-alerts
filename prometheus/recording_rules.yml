@@ -1,0 +1,72 @@
+groups:
+  - name: sample-service.slo.requests
+    rules:
+      - record: sample_service:requests:rate5m
+        expr: sum(rate(http_requests_total{job="sample-service"}[5m]))
+      - record: sample_service:requests:rate30m
+        expr: sum(rate(http_requests_total{job="sample-service"}[30m]))
+      - record: sample_service:requests:rate1h
+        expr: sum(rate(http_requests_total{job="sample-service"}[1h]))
+      - record: sample_service:requests:rate2h
+        expr: sum(rate(http_requests_total{job="sample-service"}[2h]))
+      - record: sample_service:requests:rate6h
+        expr: sum(rate(http_requests_total{job="sample-service"}[6h]))
+      - record: sample_service:requests:rate1d
+        expr: sum(rate(http_requests_total{job="sample-service"}[1d]))
+      - record: sample_service:requests:rate3d
+        expr: sum(rate(http_requests_total{job="sample-service"}[3d]))
+
+  - name: sample-service.slo.errors
+    rules:
+      - record: sample_service:errors:rate5m
+        expr: sum(rate(http_requests_total{job="sample-service",code=~"5.."}[5m]))
+      - record: sample_service:errors:rate30m
+        expr: sum(rate(http_requests_total{job="sample-service",code=~"5.."}[30m]))
+      - record: sample_service:errors:rate1h
+        expr: sum(rate(http_requests_total{job="sample-service",code=~"5.."}[1h]))
+      - record: sample_service:errors:rate2h
+        expr: sum(rate(http_requests_total{job="sample-service",code=~"5.."}[2h]))
+      - record: sample_service:errors:rate6h
+        expr: sum(rate(http_requests_total{job="sample-service",code=~"5.."}[6h]))
+      - record: sample_service:errors:rate1d
+        expr: sum(rate(http_requests_total{job="sample-service",code=~"5.."}[1d]))
+      - record: sample_service:errors:rate3d
+        expr: sum(rate(http_requests_total{job="sample-service",code=~"5.."}[3d]))
+
+  # error_ratio is the fraction of requests that failed over the window.
+  # burnrate expresses that ratio in units of "SLO error budgets per unit time",
+  # i.e. burnrate == 1 means the service is consuming its 30-day error budget
+  # exactly as fast as the SLO allows; burnrate == 14.4 means ~14x too fast.
+  - name: sample-service.slo.burnrate
+    rules:
+      - record: sample_service:error_ratio:rate5m
+        expr: sample_service:errors:rate5m / sample_service:requests:rate5m
+      - record: sample_service:error_ratio:rate30m
+        expr: sample_service:errors:rate30m / sample_service:requests:rate30m
+      - record: sample_service:error_ratio:rate1h
+        expr: sample_service:errors:rate1h / sample_service:requests:rate1h
+      - record: sample_service:error_ratio:rate2h
+        expr: sample_service:errors:rate2h / sample_service:requests:rate2h
+      - record: sample_service:error_ratio:rate6h
+        expr: sample_service:errors:rate6h / sample_service:requests:rate6h
+      - record: sample_service:error_ratio:rate1d
+        expr: sample_service:errors:rate1d / sample_service:requests:rate1d
+      - record: sample_service:error_ratio:rate3d
+        expr: sample_service:errors:rate3d / sample_service:requests:rate3d
+
+      # SLO = 99.9% availability over a 30 day window -> error budget = 0.1% = 0.001.
+      # burnrate = error_ratio / error_budget
+      - record: sample_service:burnrate5m
+        expr: sample_service:error_ratio:rate5m / 0.001
+      - record: sample_service:burnrate30m
+        expr: sample_service:error_ratio:rate30m / 0.001
+      - record: sample_service:burnrate1h
+        expr: sample_service:error_ratio:rate1h / 0.001
+      - record: sample_service:burnrate2h
+        expr: sample_service:error_ratio:rate2h / 0.001
+      - record: sample_service:burnrate6h
+        expr: sample_service:error_ratio:rate6h / 0.001
+      - record: sample_service:burnrate1d
+        expr: sample_service:error_ratio:rate1d / 0.001
+      - record: sample_service:burnrate3d
+        expr: sample_service:error_ratio:rate3d / 0.001
