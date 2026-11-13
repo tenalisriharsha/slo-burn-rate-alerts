@@ -1,0 +1,29 @@
+services:
+  sample-service:
+    build: ./sample-service
+    ports:
+      - "8000:8000"
+    environment:
+      ERROR_RATE: "0.001"
+      TRAFFIC_RPS: "20"
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    depends_on:
+      - sample-service
+      - alertmanager
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager:/etc/alertmanager:ro
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml

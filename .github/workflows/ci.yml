@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate-prometheus-config:
+    runs-on: ubuntu-latest
+    container:
+      image: prom/prometheus:latest
+      options: --entrypoint ""
+    steps:
+      - uses: actions/checkout@v4
+      - name: promtool check config
+        run: promtool check config prometheus/prometheus.yml
+      - name: promtool check rules
+        run: promtool check rules prometheus/recording_rules.yml prometheus/alerting_rules.yml
+
+  validate-alertmanager-config:
+    runs-on: ubuntu-latest
+    container:
+      image: prom/alertmanager:latest
+      options: --entrypoint ""
+    steps:
+      - uses: actions/checkout@v4
+      - name: amtool check-config
+        run: amtool check-config alertmanager/alertmanager.yml
+
+  test-sample-service:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r sample-service/requirements.txt
+          if [ -f sample-service/requirements-dev.txt ]; then
+            pip install -r sample-service/requirements-dev.txt
+          fi
+          pip install pytest
+      - name: Run tests
+        run: |
+          if [ -d tests ] || ls sample-service/test_*.py sample-service/*_test.py sample-service/tests >/dev/null 2>&1; then
+            pytest
+          else
+            echo "No tests found yet"
+          fi
