@@ -1,0 +1,63 @@
+global:
+  resolve_timeout: 5m
+
+# Routing tree: SLO burn-rate alerts carry a `severity` label of either
+# `critical` (fast/medium-fast burn -> should page someone now) or `warning`
+# (slow/very-slow burn -> fine as a ticket for business hours). See
+# docs/runbook.md for why each tier maps the way it does.
+route:
+  receiver: default
+  group_by: [alertname, slo]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: page
+      group_wait: 10s
+      repeat_interval: 1h
+      continue: false
+
+    - matchers:
+        - severity="warning"
+      receiver: ticket
+      repeat_interval: 12h
+      continue: false
+
+# Inhibit the slower, lower-confidence tiers once a faster tier for the same
+# SLO has already fired - they are describing the same underlying incident
+# at different time horizons, so paging and filing a ticket for both is noise.
+inhibit_rules:
+  - source_matchers:
+      - window="fast"
+    target_matchers:
+      - window=~"medium-fast|slow|very-slow"
+    equal: [slo]
+  - source_matchers:
+      - window="medium-fast"
+    target_matchers:
+      - window=~"slow|very-slow"
+    equal: [slo]
+  - source_matchers:
+      - window="slow"
+    target_matchers:
+      - window="very-slow"
+    equal: [slo]
+
+receivers:
+  # No integrations configured: this repo is a reference implementation, not
+  # a live on-call setup. Alerts still show up in the Alertmanager UI and API.
+  # In a real deployment, add slack_configs / pagerduty_configs / etc. here.
+  - name: default
+
+  - name: page
+    # e.g.:
+    # pagerduty_configs:
+    #   - routing_key: '<pagerduty-integration-key>'
+
+  - name: ticket
+    # e.g.:
+    # slack_configs:
+    #   - api_url: '<slack-webhook-url>'
+    #     channel: '#slo-tickets'
