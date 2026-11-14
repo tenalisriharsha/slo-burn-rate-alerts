@@ -1,6 +1,6 @@
-.PHONY: up down logs check check-prometheus check-alertmanager burn reset
+.PHONY: up down logs check check-prometheus check-alertmanager burn reset demo
 
-# Bring up the demo stack (sample-service + Prometheus + Alertmanager).
+# Bring up the demo stack (sample-service + Prometheus + Alertmanager + Grafana).
 up:
 	docker compose up -d --build
 
@@ -37,3 +37,9 @@ burn:
 reset:
 	curl -s -X POST localhost:8000/error-rate -H 'Content-Type: application/json' \
 		-d '{"rate": 0.001}'
+
+# Run the scripted incident demo (ramp up, hold, recover) against a running
+# stack. Usage: make demo TIER=fast (default: fast; also medium-fast, slow,
+# very-slow - see scripts/demo-incident.sh for their much longer hold times).
+demo:
+	scripts/demo-incident.sh $(or $(TIER),fast)
