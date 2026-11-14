@@ -1,0 +1,127 @@
+{
+  "title": "SLO Burn Rate - sample-service",
+  "uid": "slo-burn-rate",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "10s",
+  "tags": ["slo", "burn-rate"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Burn Rate by Window",
+      "description": "sample_service:burnrate<window> for all 7 windows used by the 4 alert tiers. Horizontal lines at 1x/3x/6x/14.4x mark the very-slow/slow/medium-fast/fast thresholds from prometheus/alerting_rules.yml.",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 0 },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        { "refId": "A", "expr": "sample_service:burnrate5m", "legendFormat": "5m" },
+        { "refId": "B", "expr": "sample_service:burnrate30m", "legendFormat": "30m" },
+        { "refId": "C", "expr": "sample_service:burnrate1h", "legendFormat": "1h" },
+        { "refId": "D", "expr": "sample_service:burnrate2h", "legendFormat": "2h" },
+        { "refId": "E", "expr": "sample_service:burnrate6h", "legendFormat": "6h" },
+        { "refId": "F", "expr": "sample_service:burnrate1d", "legendFormat": "1d" },
+        { "refId": "G", "expr": "sample_service:burnrate3d", "legendFormat": "3d" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Days Until Error Budget Exhausted",
+      "description": "30 / sample_service:burnrate1h - at the current 1h burn rate, how many days until the full 30-day error budget is gone. Matches the 'budget exhausted in ~N days' framing in docs/runbook.md. Capped at 30 (a burn rate at or below 1x never exhausts the budget within the period).",
+      "type": "gauge",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "d",
+          "min": 0,
+          "max": 30,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 2 },
+              { "color": "yellow", "value": 10 },
+              { "color": "green", "value": 30 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_max(30 / sample_service:burnrate1h, 30)",
+          "legendFormat": "days remaining"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Request Rate vs Error Rate (5m)",
+      "description": "sample_service:requests:rate5m and sample_service:errors:rate5m - the raw traffic behind the burn-rate calculation.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "reqps"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "errors" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "requests" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        { "refId": "A", "expr": "sample_service:requests:rate5m", "legendFormat": "requests" },
+        { "refId": "B", "expr": "sample_service:errors:rate5m", "legendFormat": "errors" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Active SLO Alerts",
+      "description": "ALERTS{slo=\"sample-service-availability\"} - the live state of all 4 burn-rate alert tiers as evaluated by Prometheus.",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ALERTS{slo=\"sample-service-availability\"}",
+          "format": "table",
+          "instant": true
+        }
+      ]
+    }
+  ]
+}
