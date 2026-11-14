@@ -46,18 +46,42 @@ inhibit_rules:
     equal: [slo]
 
 receivers:
-  # No integrations configured: this repo is a reference implementation, not
-  # a live on-call setup. Alerts still show up in the Alertmanager UI and API.
-  # In a real deployment, add slack_configs / pagerduty_configs / etc. here.
+  # No integrations are active by default: this repo is a reference
+  # implementation, not a live on-call setup, and shipping a real webhook
+  # URL or API key in a public repo would be a leaked credential. Alerts
+  # still show up in the Alertmanager UI and API with no receiver configured.
+  # See docs/integrations.md for the exact steps to turn the `page` and
+  # `ticket` blocks below from comments into a real PagerDuty/Slack
+  # integration - get a credential, set it as an environment variable,
+  # uncomment, `make check`, restart.
   - name: default
 
   - name: page
-    # e.g.:
+    # PagerDuty - fires for severity=critical (the fast/medium-fast tiers).
+    # 1. Create a PagerDuty service with a "Prometheus" or "Events API v2"
+    #    integration and copy its integration key.
+    # 2. Uncomment the block below and set PAGERDUTY_ROUTING_KEY in the
+    #    alertmanager service's environment (see docker-compose.yml).
     # pagerduty_configs:
-    #   - routing_key: '<pagerduty-integration-key>'
+    #   - routing_key: '${PAGERDUTY_ROUTING_KEY}'
+    #     severity: '{{ .CommonLabels.severity }}'
+    #     description: '{{ .CommonAnnotations.summary }}'
+    #     details:
+    #       slo: '{{ .CommonLabels.slo }}'
+    #       window: '{{ .CommonLabels.window }}'
+    #       runbook: 'https://github.com/tenalisriharsha/slo-burn-rate-alerts/blob/main/docs/runbook.md'
 
   - name: ticket
-    # e.g.:
+    # Slack - fires for severity=warning (the slow/very-slow tiers).
+    # 1. Create a Slack incoming webhook for the channel you want tickets
+    #    filed in (Slack app settings -> Incoming Webhooks).
+    # 2. Uncomment the block below and set SLACK_WEBHOOK_URL in the
+    #    alertmanager service's environment (see docker-compose.yml).
     # slack_configs:
-    #   - api_url: '<slack-webhook-url>'
+    #   - api_url: '${SLACK_WEBHOOK_URL}'
     #     channel: '#slo-tickets'
+    #     title: '{{ .CommonLabels.alertname }}: {{ .CommonLabels.slo }}'
+    #     text: >-
+    #       {{ .CommonAnnotations.description }}
+    #       (window={{ .CommonLabels.window }}, severity={{ .CommonLabels.severity }})
+    #     send_resolved: true
