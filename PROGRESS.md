@@ -20,17 +20,21 @@ Prometheus
     - recording_rules.yml: error ratio + burn rate over 7 windows
       (5m, 30m, 1h, 2h, 6h, 1d, 3d)
     - alerting_rules.yml: 4 multi-window multi-burn-rate alert tiers
-        |
-        v
-Alertmanager
-    - routes severity=critical -> "page" receiver
-    - routes severity=warning  -> "ticket" receiver
-    - inhibits slower tiers once a faster tier is already firing
+        |              \
+        v               v
+Alertmanager          Grafana
+    - routes severity=critical       - provisioned dashboard: burn rate
+      -> "page" receiver               per window, error-budget gauge,
+    - routes severity=warning          request/error rate, live alerts
+      -> "ticket" receiver
+    - inhibits slower tiers once a
+      faster tier is already firing
 ```
 
 Everything is wired together with `docker-compose.yml` so the whole stack
 (including synthetic traffic) runs with one command - see the README quick
-start.
+start. `scripts/demo-incident.sh` (`make demo`) scripts the manual
+`make burn` / `make reset` workflow into a single ramp/hold/recover run.
 
 ## Phased build plan
 
@@ -58,17 +62,34 @@ start.
       false-positive/false-negative tradeoff discussion
 - [x] README with quick start + preview screenshots
 
-### Phase 2 - Visualization + routing depth (not started)
+### Phase 2 - Visualization + routing depth (done)
 
-- [ ] Grafana dashboard (burn rate per tier, error budget remaining gauge,
-      request/error rate panels), provisioned via docker-compose
-- [ ] `scripts/` demo script that drives `/error-rate` through a scripted
-      incident (ramp up, hold, recover) so each alert tier can be
-      demonstrated end-to-end on demand
-- [ ] Alertmanager receiver templates with real integration instructions
-      (Slack, PagerDuty) rather than placeholders
-- [ ] promtool rule unit tests (fixtures owned by the test suite, not this
-      phase) covering each alert tier's threshold boundaries
+- [x] Grafana service added to `docker-compose.yml` (`localhost:3000`,
+      anonymous viewer access, admin/admin), auto-provisioned with a
+      Prometheus datasource (`grafana/provisioning/datasources/`) and a
+      dashboard provider (`grafana/provisioning/dashboards/`)
+- [x] `grafana/dashboards/slo-burn-rate.json`: 4 panels - burn rate across
+      all 7 windows, a "days until budget exhausted" gauge
+      (`30 / sample_service:burnrate1h`), request vs error rate, and a
+      live table of `ALERTS{slo="sample-service-availability"}`
+- [x] `scripts/demo-incident.sh`: drives `POST /error-rate` through a
+      ramp/hold/recover cycle for any of the 4 tiers (`make demo
+      TIER=<tier>`); always resets to baseline on exit via a trap, even on
+      Ctrl-C
+- [x] `alertmanager/alertmanager.yml`: `page`/`ticket` receivers now carry
+      complete (commented-out) `pagerduty_configs`/`slack_configs` blocks
+      with real field names and Go templating, referencing `${VAR}`
+      env-var placeholders instead of embedding any credential
+- [x] `docs/integrations.md`: step-by-step instructions to get a PagerDuty
+      integration key / Slack webhook, set it as an env var, and uncomment
+      the matching block
+- [x] Ran the real stack again end-to-end (`docker compose up`, `make
+      demo TIER=fast`): confirmed Grafana auto-loads the datasource and
+      dashboard with no manual clicking, the dashboard panels populate with
+      real data during the simulated incident, and `make check` still
+      passes after the alertmanager.yml edits
+- [x] promtool rule unit tests (`tests/promtool/rules_test.yml`, owned by
+      the test suite) already cover each alert tier's threshold boundaries
 
 ### Phase 3 - Polish (not started)
 
@@ -81,12 +102,29 @@ start.
 
 ## Resume point
 
-Start Phase 2 by writing `docker-compose.yml`'s Grafana service (image
-`grafana/grafana`, provisioned datasource pointing at `prometheus:9090`) and
-a dashboard JSON under `grafana/dashboards/` with panels for
-`sample_service:burnrate5m/1h/6h/1d`. Then write
-`scripts/demo-incident.sh`, which should call the sample service's existing
-`POST /error-rate` endpoint (see `sample-service/app.py`) - no new
-application code needed, just orchestration.
+Start Phase 3 with the latency SLO example: it needs the sample service to
+actually emit a request-duration histogram with controllable tail latency
+(`app.py` currently has no artificial latency anywhere - the error-rate
+control doesn't touch timing), so that part is real application code, not
+just orchestration. Plan:
+
+1. `sample-service/app.py`: add a `http_request_duration_seconds` Histogram,
+   and a second runtime-adjustable knob (e.g. `/slow-rate`, mirroring
+   `/error-rate`) that controls what fraction of synthetic requests sleep
+   for ~400ms instead of completing instantly.
+2. `prometheus/latency_recording_rules.yml` +
+   `prometheus/latency_alerting_rules.yml`: same burn-rate pattern as the
+   error-budget rules, but for a `p99 < 300ms` SLO - add both to
+   `prometheus.yml`'s `rule_files`. Give the alerts a distinct
+   `slo: sample-service-latency` label so they route through the existing
+   severity-based Alertmanager rules without any changes there.
+3. Add a panel (or a second dashboard) in `grafana/dashboards/` for the
+   latency burn rate.
+4. Extend `docs/runbook.md` with a short section making the "the thresholds
+   only depend on the error budget, not the metric" point explicit by
+   showing the same math applied to latency.
+5. Then: architecture diagram image, CI promtool-rule-unit-test step, a
+   final documentation pass - all smaller, do them after the latency
+   example works end-to-end against the real stack.
 
 STATUS: IN_PROGRESS
