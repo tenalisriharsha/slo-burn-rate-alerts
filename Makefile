@@ -1,4 +1,4 @@
-.PHONY: up down logs check check-prometheus check-alertmanager burn reset demo
+.PHONY: up down logs check check-prometheus check-alertmanager lint burn reset demo
 
 # Bring up the demo stack (sample-service + Prometheus + Alertmanager + Grafana).
 up:
@@ -27,6 +27,10 @@ check-alertmanager:
 	docker run --rm -v "$$PWD/alertmanager:/etc/alertmanager:ro" \
 		--entrypoint amtool prom/alertmanager:latest \
 		check-config /etc/alertmanager/alertmanager.yml
+
+# Lint the sample service with ruff (pip install -r sample-service/requirements-dev.txt).
+lint:
+	ruff check sample-service/
 
 # Push the sample service's synthetic error rate up to simulate an incident.
 # Usage: make burn RATE=0.5
