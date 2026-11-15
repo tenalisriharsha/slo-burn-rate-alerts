@@ -3,38 +3,42 @@
 ## Vision
 
 A reference implementation of Google SRE-style multi-window multi-burn-rate
-alerting: Prometheus recording rules and Alertmanager routes for a sample
-service's error budget, with a runbook explaining the math and
-false-positive tradeoffs.
+alerting: Prometheus recording rules and Alertmanager routes for two
+independent SLOs (availability and latency) on a sample service, with a
+runbook explaining the math and false-positive tradeoffs.
 
 ## Architecture
 
 ```
 sample-service (Flask + prometheus_client)
-    - exposes /metrics (http_requests_total{code})
-    - POST /error-rate lets a demo script simulate an incident
+    - exposes /metrics (http_requests_total{code}, http_request_duration_seconds)
+    - POST /error-rate and POST /slow-rate let a demo script simulate an incident
         |
         v
 Prometheus
     - scrapes sample-service
-    - recording_rules.yml: error ratio + burn rate over 7 windows
-      (5m, 30m, 1h, 2h, 6h, 1d, 3d)
-    - alerting_rules.yml: 4 multi-window multi-burn-rate alert tiers
+    - recording_rules.yml + latency_recording_rules.yml: error ratio /
+      latency ratio + burn rate, each over 7 windows (5m, 30m, 1h, 2h, 6h,
+      1d, 3d)
+    - alerting_rules.yml + latency_alerting_rules.yml: 4 multi-window
+      multi-burn-rate alert tiers per SLO (8 alerts total)
         |              \
         v               v
 Alertmanager          Grafana
     - routes severity=critical       - provisioned dashboard: burn rate
-      -> "page" receiver               per window, error-budget gauge,
-    - routes severity=warning          request/error rate, live alerts
-      -> "ticket" receiver
+      -> "page" receiver               per window (both SLOs), error-budget
+    - routes severity=warning          gauge, p99 latency estimate,
+      -> "ticket" receiver               request/error rate, live alerts
     - inhibits slower tiers once a
-      faster tier is already firing
+      faster tier is already firing (per SLO)
 ```
 
 Everything is wired together with `docker-compose.yml` so the whole stack
 (including synthetic traffic) runs with one command - see the README quick
 start. `scripts/demo-incident.sh` (`make demo`) scripts the manual
-`make burn` / `make reset` workflow into a single ramp/hold/recover run.
+`make burn` / `make reset` workflow into a single ramp/hold/recover run for
+the availability SLO; the latency SLO is driven the same way via
+`POST /slow-rate`.
 
 ## Phased build plan
 
@@ -91,40 +95,61 @@ start. `scripts/demo-incident.sh` (`make demo`) scripts the manual
 - [x] promtool rule unit tests (`tests/promtool/rules_test.yml`, owned by
       the test suite) already cover each alert tier's threshold boundaries
 
-### Phase 3 - Polish (not started)
+### Phase 3 - Polish (done)
 
-- [ ] Second SLO profile example (latency-based, e.g. p99 < 300ms) to show
-      the recording-rule pattern generalizes beyond error-rate SLOs
-- [ ] Architecture diagram image for the README
-- [ ] CI: add promtool rule unit tests to the pipeline, add lint for the
-      sample service
-- [ ] Final documentation pass
+- [x] Second SLO profile example (latency-based, p99 < 300ms): a
+      `http_request_duration_seconds` histogram and a `/slow-rate` knob in
+      `sample-service/app.py` (mirroring `/error-rate`), plus
+      `prometheus/latency_recording_rules.yml` +
+      `prometheus/latency_alerting_rules.yml` reusing the identical
+      multi-window multi-burn-rate method and thresholds, with their own
+      `slo: sample-service-latency` label so they route through the
+      existing severity-based Alertmanager rules unchanged
+- [x] Architecture diagram image for the README (`docs/architecture.png`,
+      rendered from a hand-built SVG, not a generated/AI image)
+- [x] CI: promtool rule unit tests already run as part of `pytest` in the
+      `test-sample-service` job (`tests/promtool/test_promtool.py`); added
+      a `lint-sample-service` CI job running `make lint` (ruff) against
+      `sample-service/`
+- [x] Final documentation pass: README quick start re-verified command by
+      command against a fresh `git clone` into an empty directory
+      (`make up`, `make check`, `make lint`, `make burn`/`make reset`, the
+      `/slow-rate` curls, `make down`) - all passed as written
+
+### Also fixed this session
+
+- [x] CI was red on PR #1 (`validate-prometheus-config` and
+      `validate-alertmanager-config` both failing): those jobs ran inside
+      `container: prom/prometheus:latest` / `prom/alertmanager:latest`, but
+      `actions/checkout` is a JS action and those images have no Node.js
+      runtime, so checkout itself failed with "exec
+      /__e/node24/bin/node: no such file or directory". Fixed by running
+      the jobs on the normal `ubuntu-latest` runner and shelling out to
+      `make check-prometheus` / `make check-alertmanager`, which already
+      validate correctly via `docker run` against a mounted volume (the
+      same thing `make check` has always done locally).
 
 ## Resume point
 
-Start Phase 3 with the latency SLO example: it needs the sample service to
-actually emit a request-duration histogram with controllable tail latency
-(`app.py` currently has no artificial latency anywhere - the error-rate
-control doesn't touch timing), so that part is real application code, not
-just orchestration. Plan:
+All three phases are complete. The full test suite passes (65 passed, 1
+skipped - the skip is an environment-gated integration test), `make check`
+and `make lint` pass, and the real docker-compose stack was exercised live
+this session for both SLOs: raising `/error-rate` and `/slow-rate` each
+drove all 4 of their respective alert tiers from `inactive` through
+`pending` to `firing`, routed correctly in Alertmanager, with Grafana
+panels updating live throughout.
 
-1. `sample-service/app.py`: add a `http_request_duration_seconds` Histogram,
-   and a second runtime-adjustable knob (e.g. `/slow-rate`, mirroring
-   `/error-rate`) that controls what fraction of synthetic requests sleep
-   for ~400ms instead of completing instantly.
-2. `prometheus/latency_recording_rules.yml` +
-   `prometheus/latency_alerting_rules.yml`: same burn-rate pattern as the
-   error-budget rules, but for a `p99 < 300ms` SLO - add both to
-   `prometheus.yml`'s `rule_files`. Give the alerts a distinct
-   `slo: sample-service-latency` label so they route through the existing
-   severity-based Alertmanager rules without any changes there.
-3. Add a panel (or a second dashboard) in `grafana/dashboards/` for the
-   latency burn rate.
-4. Extend `docs/runbook.md` with a short section making the "the thresholds
-   only depend on the error budget, not the metric" point explicit by
-   showing the same math applied to latency.
-5. Then: architecture diagram image, CI promtool-rule-unit-test step, a
-   final documentation pass - all smaller, do them after the latency
-   example works end-to-end against the real stack.
+Ideas for a future session (not required, nothing left is broken):
 
-STATUS: IN_PROGRESS
+- A third SLO example on a metric shape that *isn't* a simple
+  good/bad-event ratio (e.g. a saturation-style SLO on a gauge), to show
+  where the burn-rate method needs adaptation versus where it doesn't.
+- A `docker-compose.ci.yml` profile that runs the full stack in CI and
+  asserts against the live Prometheus/Alertmanager APIs, instead of only
+  config-validating the YAML (what `tests/integration/test_stack.py`
+  already does locally, gated on Docker being available).
+- Rotating/randomized synthetic traffic patterns (daily seasonality) so the
+  burn-rate graphs in the README screenshots look less like a flat line
+  before an incident.
+
+STATUS: COMPLETE
