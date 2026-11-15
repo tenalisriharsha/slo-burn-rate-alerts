@@ -108,7 +108,7 @@
     {
       "id": 4,
       "title": "Active SLO Alerts",
-      "description": "ALERTS{slo=\"sample-service-availability\"} - the live state of all 4 burn-rate alert tiers as evaluated by Prometheus.",
+      "description": "ALERTS{slo=\"sample-service-availability\"} - the live state of all 4 availability burn-rate alert tiers as evaluated by Prometheus.",
       "type": "table",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -118,6 +118,85 @@
         {
           "refId": "A",
           "expr": "ALERTS{slo=\"sample-service-availability\"}",
+          "format": "table",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Latency Burn Rate by Window",
+      "description": "sample_service:latency_burnrate<window> for all 7 windows used by the 4 latency alert tiers in prometheus/latency_alerting_rules.yml (p99 < 300ms SLO). Same thresholds and interpretation as the availability burn-rate panel above.",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 0 },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        { "refId": "A", "expr": "sample_service:latency_burnrate5m", "legendFormat": "5m" },
+        { "refId": "B", "expr": "sample_service:latency_burnrate30m", "legendFormat": "30m" },
+        { "refId": "C", "expr": "sample_service:latency_burnrate1h", "legendFormat": "1h" },
+        { "refId": "D", "expr": "sample_service:latency_burnrate2h", "legendFormat": "2h" },
+        { "refId": "E", "expr": "sample_service:latency_burnrate6h", "legendFormat": "6h" },
+        { "refId": "F", "expr": "sample_service:latency_burnrate1d", "legendFormat": "1d" },
+        { "refId": "G", "expr": "sample_service:latency_burnrate3d", "legendFormat": "3d" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "p99 Latency Estimate",
+      "description": "histogram_quantile(0.99, ...) over the last 5m, against the 300ms SLO target line.",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.3 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"sample-service\"}[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Active Latency SLO Alerts",
+      "description": "ALERTS{slo=\"sample-service-latency\"} - the live state of all 4 latency burn-rate alert tiers as evaluated by Prometheus.",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 26 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ALERTS{slo=\"sample-service-latency\"}",
           "format": "table",
           "instant": true
         }
