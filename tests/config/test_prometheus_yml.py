@@ -1,7 +1,8 @@
-"""Structural checks on prometheus/prometheus.yml: both rule files are
-loaded and the sample service is scraped, as required for
-recording_rules.yml / alerting_rules.yml to ever evaluate against real
-data (README.md "How it works" diagram).
+"""Structural checks on prometheus/prometheus.yml: all four rule files
+(availability + latency) are loaded and the sample service is scraped, as
+required for recording_rules.yml / alerting_rules.yml / the latency
+equivalents to ever evaluate against real data (README.md "How it works"
+diagram, docs/runbook.md "Latency SLO").
 """
 from pathlib import Path
 
@@ -19,6 +20,12 @@ def test_both_rule_files_are_loaded():
     rule_files = _load()["rule_files"]
     assert any("recording_rules.yml" in f for f in rule_files)
     assert any("alerting_rules.yml" in f for f in rule_files)
+
+
+def test_latency_rule_files_are_also_loaded():
+    rule_files = _load()["rule_files"]
+    assert any(f.endswith("latency_recording_rules.yml") for f in rule_files)
+    assert any(f.endswith("latency_alerting_rules.yml") for f in rule_files)
 
 
 def test_scrapes_the_sample_service_on_its_documented_port():

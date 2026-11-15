@@ -1,8 +1,9 @@
-"""Unit tests for sample-service/app.py's Flask routes and error-rate
-state, using Flask's test client directly against the real app module -
-no mocking of the project's own code. Covers the documented behavior:
-GET / and /metrics, and GET/POST /error-rate including the clamping and
-validation docs/README.md and the module's own docstring promise.
+"""Unit tests for sample-service/app.py's Flask routes and error-rate /
+slow-rate state, using Flask's test client directly against the real app
+module - no mocking of the project's own code. Covers the documented
+behavior: GET / and /metrics, and GET/POST /error-rate and /slow-rate
+including the clamping and validation docs/README.md and the module's own
+docstring promise.
 """
 import importlib
 import sys
@@ -19,6 +20,7 @@ app_module = importlib.import_module("app")
 @pytest.fixture
 def client():
     app_module.set_error_rate(0.001)
+    app_module.set_slow_rate(0.001)
     return app_module.app.test_client()
 
 
@@ -28,6 +30,7 @@ def test_index_reports_service_name_and_current_state(client):
     body = response.get_json()
     assert body["service"] == "sample-service"
     assert body["error_rate"] == pytest.approx(0.001)
+    assert body["slow_rate"] == pytest.approx(0.001)
     assert "traffic_rps" in body
 
 
@@ -39,6 +42,18 @@ def test_metrics_endpoint_exposes_prometheus_text_format(client):
     body = response.get_data(as_text=True)
     assert "http_requests_total" in body
     assert 'code="200"' in body
+
+
+def test_metrics_endpoint_exposes_the_latency_histogram_with_the_slo_bucket(client):
+    """prometheus/latency_recording_rules.yml reads the cumulative
+    le="0.3" bucket, so /metrics must expose it under that exact label -
+    a missing or renamed bucket would silently zero out the latency SLO.
+    """
+    app_module.LATENCY_HISTOGRAM.observe(0.05)
+    response = client.get("/metrics")
+    body = response.get_data(as_text=True)
+    assert "http_request_duration_seconds_bucket" in body
+    assert 'le="0.3"' in body
 
 
 def test_get_error_rate_route_returns_current_rate(client):
@@ -93,3 +108,69 @@ def test_set_error_rate_does_not_mutate_state_on_invalid_input(client):
     app_module.set_error_rate(0.2)
     client.post("/error-rate", json={"rate": "nope"})
     assert app_module.get_error_rate() == 0.2
+
+
+def test_get_slow_rate_route_returns_current_rate(client):
+    app_module.set_slow_rate(0.25)
+    response = client.get("/slow-rate")
+    assert response.status_code == 200
+    assert response.get_json() == {"slow_rate": 0.25}
+
+
+def test_post_slow_rate_sets_and_returns_the_new_rate(client):
+    response = client.post("/slow-rate", json={"rate": 0.5})
+    assert response.status_code == 200
+    assert response.get_json() == {"slow_rate": 0.5}
+    assert app_module.get_slow_rate() == 0.5
+
+
+@pytest.mark.parametrize(
+    "requested,expected",
+    [
+        (1.5, 1.0),  # clamp above 1.0
+        (-0.3, 0.0),  # clamp below 0.0
+        (0.0, 0.0),
+        (1.0, 1.0),
+    ],
+)
+def test_post_slow_rate_clamps_to_the_0_to_1_range(client, requested, expected):
+    response = client.post("/slow-rate", json={"rate": requested})
+    assert response.status_code == 200
+    assert response.get_json() == {"slow_rate": expected}
+
+
+def test_post_slow_rate_without_rate_field_is_a_400():
+    client = app_module.app.test_client()
+    response = client.post("/slow-rate", json={})
+    assert response.status_code == 400
+    assert "rate" in response.get_json()["error"]
+
+
+def test_post_slow_rate_with_non_numeric_rate_is_a_400():
+    client = app_module.app.test_client()
+    response = client.post("/slow-rate", json={"rate": "not-a-number"})
+    assert response.status_code == 400
+
+
+def test_post_slow_rate_with_no_body_is_a_400():
+    client = app_module.app.test_client()
+    response = client.post("/slow-rate")
+    assert response.status_code == 400
+
+
+def test_set_slow_rate_does_not_mutate_state_on_invalid_input(client):
+    app_module.set_slow_rate(0.2)
+    client.post("/slow-rate", json={"rate": "nope"})
+    assert app_module.get_slow_rate() == 0.2
+
+
+def test_error_rate_and_slow_rate_are_independent_knobs(client):
+    """app.py's docstring promises /error-rate and /slow-rate are
+    independent controls - setting one must not perturb the other.
+    """
+    app_module.set_error_rate(0.4)
+    app_module.set_slow_rate(0.1)
+    client.post("/error-rate", json={"rate": 0.9})
+    assert app_module.get_slow_rate() == 0.1
+    client.post("/slow-rate", json={"rate": 0.9})
+    assert app_module.get_error_rate() == 0.9

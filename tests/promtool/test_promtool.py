@@ -88,8 +88,16 @@ def test_promtool_check_config_passes():
 
 
 def test_promtool_check_rules_passes():
+    # Mirrors `make check-prometheus`, which validates all four rule files -
+    # the two availability ones plus the latency ones added alongside the
+    # second SLO - not just the availability pair.
     result = _run_promtool(
-        "check", "rules", "prometheus/recording_rules.yml", "prometheus/alerting_rules.yml"
+        "check",
+        "rules",
+        "prometheus/recording_rules.yml",
+        "prometheus/alerting_rules.yml",
+        "prometheus/latency_recording_rules.yml",
+        "prometheus/latency_alerting_rules.yml",
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
