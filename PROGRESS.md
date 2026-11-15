@@ -152,4 +152,29 @@ Ideas for a future session (not required, nothing left is broken):
   burn-rate graphs in the README screenshots look less like a flat line
   before an incident.
 
-STATUS: COMPLETE
+## Known gap: published repo is stale
+
+An independent clean-environment verification pass (2026-11-15) ran the
+README's quick start against the *published* GitHub repository
+(`github.com/tenalisriharsha/slo-burn-rate-alerts`, branch `main`) and
+failed: `main` there is several commits behind this branch's content - it
+has no `grafana/` directory, no `scripts/demo-incident.sh`, no `tests/`
+suite, and no latency SLO (`latency_recording_rules.yml` /
+`latency_alerting_rules.yml`), and its `docker-compose.yml` only defines 3
+services (no Grafana), so `make up` there never brings up `localhost:3000`
+as the README describes.
+
+This is not a code or README defect: every file the README references
+(the `grafana/` dir, `scripts/demo-incident.sh`, `tests/`, the latency
+rule files, the 4-service `docker-compose.yml`) already exists in this
+branch's working tree, confirmed again on 2026-11-15. The gap is purely
+that `main` on GitHub has not been fast-forwarded/merged to include this
+branch's commits. Fixing it requires a `git push`/merge to `main`, which
+is outside what an unattended coding session should do without the user's
+explicit sign-off (pushing/rewriting a shared branch's history is exactly
+the kind of action that needs confirmation first). Next session (or the
+user directly): fast-forward or merge `main` to the tip of this branch and
+push, then the README's quick start will work against a fresh clone as
+written.
+
+STATUS: COMPLETE (pending the push/merge above to make the published repo match)
