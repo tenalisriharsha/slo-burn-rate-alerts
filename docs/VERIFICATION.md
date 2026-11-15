@@ -26,14 +26,12 @@ early README/runbook). It does **not** contain the `grafana/` directory,
 (`latency_recording_rules.yml`, `latency_alerting_rules.yml`). Its
 `docker-compose.yml` defines only three services (sample-service,
 Prometheus, Alertmanager) — there is no Grafana service at all, so
-`localhost:3000` never comes up. Running `make up` against that clone
-succeeds and starts three containers, but the README text being followed
-(the one in this working directory, describing four containers, a Grafana
-dashboard, and a second latency SLO) does not match what the published
-repository actually provides. A first-time user pasting the quick-start
-commands verbatim gets a stack that contradicts the README they just read.
+`localhost:3000` never comes up. A first-time user pasting the quick-start
+`git clone` command verbatim gets a stack that cannot satisfy the rest of
+the quick-start instructions describing four containers and a Grafana
+dashboard.
 
-To still exercise the project's current, intended behavior, verification
+To exercise the project's current, intended behavior, verification
 continued against a fresh clone of the local repository at its current
 branch (equivalent in content to this working directory) in a new temporary
 directory, with `make up` run there instead:
@@ -52,13 +50,15 @@ directory, with `make up` run there instead:
   `alerting_rules.yml` (4 rules), `latency_recording_rules.yml` (21 rules),
   `latency_alerting_rules.yml` (4 rules); amtool validated
   `alertmanager.yml` (3 inhibit rules, 3 receivers). All succeeded.
+- `make lint` (after `pip install -r sample-service/requirements-dev.txt`)
+  → `ruff check sample-service/` → `All checks passed!`
 
 Result: FAIL - the README's quick-start `git clone` command points at a
 published repository whose default branch is several commits behind this
-project's current state, so it lacks Grafana, the latency SLO, and other
-features the current README describes; the rest of this check (and the
-sections below) was run against a fresh clone of the project's current
-content instead, which passed.
+project's current state, so the stack it actually produces (3 containers,
+no Grafana, no latency SLO) contradicts the rest of the quick start text a
+first-time user just read. The remainder of this check, run against the
+project's current content directly, passed with no deviation.
 
 ## Headline feature run
 
@@ -73,18 +73,18 @@ Expected (per README): burn-rate alerts move `inactive` → `pending` →
 `firing` as the error rate stays elevated.
 
 Observed, polling `localhost:9090/api/v1/rules`:
-- t=10s: `SampleServiceErrorBudgetBurnFast` = `pending`,
-  `sample_service:burnrate5m` ≈ 580x (threshold is 14.4x)
-- t=120s: `SampleServiceErrorBudgetBurnFast` = `firing`, matching the
-  documented `for: 2m`
+- shortly after the burn: `sample_service:burnrate5m` ≈ 333x (threshold is
+  14.4x), all four availability tiers (`SampleServiceErrorBudgetBurnFast`,
+  `MediumFast`, `Slow`, `VerySlow`) at `pending`
+- after `for: 2m` elapsed: `SampleServiceErrorBudgetBurnFast` = `firing`
 - `curl localhost:9093/api/v2/alerts` showed the alert received by
-  Alertmanager, `severity: critical`, routed to the `page` receiver,
-  exactly matching the tier table in the README.
+  Alertmanager with `severity: critical` and state `active`, matching the
+  "page" tier in the README's table
 
 ```bash
 make reset
 ```
-cleared the error rate back to `0.001` and the alert state back down.
+cleared the error rate back to `0.001`.
 
 Then simulated the independent latency incident:
 
@@ -92,8 +92,8 @@ Then simulated the independent latency incident:
 curl -X POST localhost:8000/slow-rate -H 'Content-Type: application/json' -d '{"rate": 0.9}'
 ```
 
-Observed: `SampleServiceLatencyBudgetBurnFast` went `pending` at t=60s with
-`sample_service:latency_burnrate5m` ≈ 18.4x (past the 14.4x threshold),
+Observed: `SampleServiceLatencyBudgetBurnFast` went to `pending` with
+`sample_service:latency_burnrate5m` ≈ 15.4x (past the 14.4x threshold),
 confirming the latency SLO behaves the same way as the availability one, as
 the README claims. Reset `slow-rate` back to `0.001`.
 
@@ -134,15 +134,14 @@ Ran the full test suite:
 ```bash
 pytest -q
 ```
-Observed: `113 passed, 1 skipped in 11.31s`. The one skip was
-`tests/integration/test_stack.py`, which the test itself reports is gated
-behind `RUN_INTEGRATION=1` since it spins up its own docker-compose stack.
-Ran it explicitly:
+Observed: `113 passed, 1 skipped in 11.19s`. The one skip was
+`tests/integration/test_stack.py`, gated behind `RUN_INTEGRATION=1` since it
+spins up its own docker-compose stack. Ran it explicitly:
 
 ```bash
-RUN_INTEGRATION=1 pytest tests/integration/test_stack.py
+RUN_INTEGRATION=1 pytest tests/integration -v
 ```
-Observed: `1 passed in 170.86s` — the test builds its own stack, drives the
+Observed: `1 passed in 180.61s` — the test builds its own stack, drives the
 same simulated incident, waits for the fast-burn tier to actually fire, and
 confirms Alertmanager routes it to the `page` receiver, then tears its stack
 down.
@@ -152,7 +151,9 @@ Also re-ran the config validation documented in the README:
 ```bash
 make check
 ```
-Observed: all promtool and amtool checks passed (see First-use check above
-for the detailed output).
+Observed: all promtool and amtool checks passed, and the docker-image-based
+`tests/promtool/test_promtool.py` suite (4 tests covering config, rules, the
+Alertmanager config, and the promtool unit tests in
+`tests/promtool/rules_test.yml`) also passed.
 
 Result: PASS
