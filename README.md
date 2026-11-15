@@ -137,6 +137,8 @@ latency alert table showing all 4 tiers:
 
 ## How it works
 
+![Architecture](docs/architecture.png)
+
 ```
 sample-service (Flask + prometheus_client)
     - exposes /metrics (http_requests_total{code}, http_request_duration_seconds)
