@@ -20,7 +20,8 @@ check-prometheus:
 		check config /etc/prometheus/prometheus.yml
 	docker run --rm -v "$$PWD/prometheus:/etc/prometheus:ro" \
 		--entrypoint promtool prom/prometheus:latest \
-		check rules /etc/prometheus/recording_rules.yml /etc/prometheus/alerting_rules.yml
+		check rules /etc/prometheus/recording_rules.yml /etc/prometheus/alerting_rules.yml \
+		/etc/prometheus/latency_recording_rules.yml /etc/prometheus/latency_alerting_rules.yml
 
 check-alertmanager:
 	docker run --rm -v "$$PWD/alertmanager:/etc/alertmanager:ro" \

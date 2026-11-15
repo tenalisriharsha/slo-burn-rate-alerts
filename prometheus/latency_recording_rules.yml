@@ -1,0 +1,59 @@
+groups:
+  # fast_ratio is the fraction of requests that completed within the SLO's
+  # latency target (p99 < 300ms), read directly off the cumulative
+  # le="0.3" histogram bucket. latency_ratio is its complement - the
+  # fraction of requests that were "bad" (too slow) - which gives it the
+  # exact same shape as sample_service:error_ratio:rateX in
+  # recording_rules.yml, so the burn-rate math below is unchanged from the
+  # error-budget case: only the metric and the budget constant differ.
+  - name: sample-service.slo.latency-fast-requests
+    rules:
+      - record: sample_service:requests_fast:rate5m
+        expr: sum(rate(http_request_duration_seconds_bucket{job="sample-service",le="0.3"}[5m]))
+      - record: sample_service:requests_fast:rate30m
+        expr: sum(rate(http_request_duration_seconds_bucket{job="sample-service",le="0.3"}[30m]))
+      - record: sample_service:requests_fast:rate1h
+        expr: sum(rate(http_request_duration_seconds_bucket{job="sample-service",le="0.3"}[1h]))
+      - record: sample_service:requests_fast:rate2h
+        expr: sum(rate(http_request_duration_seconds_bucket{job="sample-service",le="0.3"}[2h]))
+      - record: sample_service:requests_fast:rate6h
+        expr: sum(rate(http_request_duration_seconds_bucket{job="sample-service",le="0.3"}[6h]))
+      - record: sample_service:requests_fast:rate1d
+        expr: sum(rate(http_request_duration_seconds_bucket{job="sample-service",le="0.3"}[1d]))
+      - record: sample_service:requests_fast:rate3d
+        expr: sum(rate(http_request_duration_seconds_bucket{job="sample-service",le="0.3"}[3d]))
+
+  - name: sample-service.slo.latency-burnrate
+    rules:
+      - record: sample_service:latency_ratio:rate5m
+        expr: 1 - (sample_service:requests_fast:rate5m / sample_service:requests:rate5m)
+      - record: sample_service:latency_ratio:rate30m
+        expr: 1 - (sample_service:requests_fast:rate30m / sample_service:requests:rate30m)
+      - record: sample_service:latency_ratio:rate1h
+        expr: 1 - (sample_service:requests_fast:rate1h / sample_service:requests:rate1h)
+      - record: sample_service:latency_ratio:rate2h
+        expr: 1 - (sample_service:requests_fast:rate2h / sample_service:requests:rate2h)
+      - record: sample_service:latency_ratio:rate6h
+        expr: 1 - (sample_service:requests_fast:rate6h / sample_service:requests:rate6h)
+      - record: sample_service:latency_ratio:rate1d
+        expr: 1 - (sample_service:requests_fast:rate1d / sample_service:requests:rate1d)
+      - record: sample_service:latency_ratio:rate3d
+        expr: 1 - (sample_service:requests_fast:rate3d / sample_service:requests:rate3d)
+
+      # SLO = 99% of requests under 300ms -> error budget = 1 - 0.99 = 0.01.
+      # burnrate = latency_ratio / error_budget, same abstraction as the
+      # availability burn rate, just with a different budget constant.
+      - record: sample_service:latency_burnrate5m
+        expr: sample_service:latency_ratio:rate5m / 0.01
+      - record: sample_service:latency_burnrate30m
+        expr: sample_service:latency_ratio:rate30m / 0.01
+      - record: sample_service:latency_burnrate1h
+        expr: sample_service:latency_ratio:rate1h / 0.01
+      - record: sample_service:latency_burnrate2h
+        expr: sample_service:latency_ratio:rate2h / 0.01
+      - record: sample_service:latency_burnrate6h
+        expr: sample_service:latency_ratio:rate6h / 0.01
+      - record: sample_service:latency_burnrate1d
+        expr: sample_service:latency_ratio:rate1d / 0.01
+      - record: sample_service:latency_burnrate3d
+        expr: sample_service:latency_ratio:rate3d / 0.01

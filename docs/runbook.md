@@ -116,13 +116,61 @@ time to react, and raising the bar avoids paging anyone for noise.
 inhibits slower tiers once a faster tier for the same SLO is already firing,
 so a severe incident doesn't also generate a redundant ticket.
 
+## Latency SLO
+
+`sample-service` also carries a second, independent SLO: **99% of requests
+complete in under 300ms, over a rolling 30-day window** (a p99 latency
+target). This section exists to make the point from the previous sections
+concrete: the multi-window multi-burn-rate *method* only depends on the
+error budget, not on what's being measured.
+
+The error budget here is `1 - 0.99 = 0.01` (1%): the fraction of requests
+that are allowed to take 300ms or longer before the SLO is breached. That
+budget constant is the only thing that changes from the availability SLO
+above (`0.001` there vs `0.01` here) - everything else is the identical
+shape:
+
+- `sample_service:requests_fast:rate<window>` in
+  [`prometheus/latency_recording_rules.yml`](../prometheus/latency_recording_rules.yml)
+  reads the cumulative `le="0.3"` bucket of the
+  `http_request_duration_seconds` histogram exposed by the sample service,
+  giving the rate of "good" (fast enough) requests - the latency
+  equivalent of `sample_service:errors:rate<window>`, just inverted (good
+  events instead of bad ones).
+- `sample_service:latency_ratio:rate<window>` is
+  `1 - (fast_requests / total_requests)`, i.e. the fraction of *bad*
+  (too-slow) requests - exactly `sample_service:error_ratio:rate<window>`'s
+  role.
+- `sample_service:latency_burnrate<window>` is `latency_ratio / 0.01`, the
+  same division by the error budget as the availability burn rate.
+
+The four alert tiers in
+[`prometheus/latency_alerting_rules.yml`](../prometheus/latency_alerting_rules.yml)
+reuse the *exact same* thresholds (14.4x / 6x / 3x / 1x) and `for`
+durations (2m / 15m / 1h / 3h) as the availability tiers, because those
+numbers are a function of the error-budget abstraction, not of the SLO's
+target metric. Each latency alert carries `slo: sample-service-latency`
+(instead of `sample-service-availability`) and the same `severity` labels,
+so it routes through the existing severity-based rules in
+[`alertmanager/alertmanager.yml`](../alertmanager/alertmanager.yml) with no
+changes needed there - severity, not the SLO name, decides page vs ticket.
+
+To demo it: `POST /slow-rate` on the sample service (mirroring
+`POST /error-rate`) sets the fraction of synthetic requests that take
+350-600ms instead of 10-80ms, which pushes
+`sample_service:latency_burnrate*` up the same way raising `/error-rate`
+pushes `sample_service:burnrate*` up.
+
 ## Tuning for your own service
 
-The constants that are specific to *this* SLO (not to the method) live in
-one place: the `0.001` divisor in
-[`prometheus/recording_rules.yml`](../prometheus/recording_rules.yml), which
-is `1 - target_availability`. Changing the SLO target means changing that
-one number; the burn-rate thresholds (14.4, 6, 3, 1) stay the same regardless
-of what the SLO target is, because they're expressed in multiples of
-whatever the budget is - that's the whole point of the burn-rate
-abstraction.
+For each SLO, the constant that's specific to *that* SLO (not to the
+method) lives in one place: the `0.001` divisor in
+[`prometheus/recording_rules.yml`](../prometheus/recording_rules.yml) for
+availability, or the `0.01` divisor in
+[`prometheus/latency_recording_rules.yml`](../prometheus/latency_recording_rules.yml)
+for latency - both are `1 - target`. Changing an SLO's target means
+changing that one number; the burn-rate thresholds (14.4, 6, 3, 1) stay the
+same regardless of what the target is, because they're expressed in
+multiples of whatever the budget is - that's the whole point of the
+burn-rate abstraction, and exactly why the latency SLO above could reuse
+the same four tiers unchanged.

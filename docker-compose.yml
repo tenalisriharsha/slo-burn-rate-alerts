@@ -5,6 +5,7 @@ services:
       - "8000:8000"
     environment:
       ERROR_RATE: "0.001"
+      SLOW_RATE: "0.001"
       TRAFFIC_RPS: "20"
 
   prometheus:

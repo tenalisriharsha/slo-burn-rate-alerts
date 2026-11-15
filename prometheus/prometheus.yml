@@ -5,6 +5,8 @@ global:
 rule_files:
   - /etc/prometheus/recording_rules.yml
   - /etc/prometheus/alerting_rules.yml
+  - /etc/prometheus/latency_recording_rules.yml
+  - /etc/prometheus/latency_alerting_rules.yml
 
 alerting:
   alertmanagers:
