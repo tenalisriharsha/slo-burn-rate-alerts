@@ -8,25 +8,17 @@ on:
 jobs:
   validate-prometheus-config:
     runs-on: ubuntu-latest
-    container:
-      image: prom/prometheus:latest
-      options: --entrypoint ""
     steps:
       - uses: actions/checkout@v4
-      - name: promtool check config
-        run: promtool check config prometheus/prometheus.yml
-      - name: promtool check rules
-        run: promtool check rules prometheus/recording_rules.yml prometheus/alerting_rules.yml
+      - name: promtool check config + rules
+        run: make check-prometheus
 
   validate-alertmanager-config:
     runs-on: ubuntu-latest
-    container:
-      image: prom/alertmanager:latest
-      options: --entrypoint ""
     steps:
       - uses: actions/checkout@v4
       - name: amtool check-config
-        run: amtool check-config alertmanager/alertmanager.yml
+        run: make check-alertmanager
 
   test-sample-service:
     runs-on: ubuntu-latest
