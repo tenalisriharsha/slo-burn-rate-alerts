@@ -78,6 +78,12 @@ keep running) with:
 make check
 ```
 
+Lint the sample service (requires `pip install -r sample-service/requirements-dev.txt`):
+
+```bash
+make lint
+```
+
 ## Preview
 
 The sample service's error rate was pushed to 50% to simulate an incident,
@@ -217,7 +223,7 @@ docs/
   runbook.md             the math and the tradeoffs, for both SLOs
   integrations.md        wiring up real Slack/PagerDuty delivery
 docker-compose.yml       wires all four services together
-Makefile                 up / down / check / burn / reset / demo
+Makefile                 up / down / check / lint / burn / reset / demo
 ```
 
 ## Status
