@@ -1,9 +1,9 @@
 """Unit tests for sample-service/app.py's Flask routes and error-rate /
-slow-rate state, using Flask's test client directly against the real app
-module - no mocking of the project's own code. Covers the documented
-behavior: GET / and /metrics, and GET/POST /error-rate and /slow-rate
-including the clamping and validation docs/README.md and the module's own
-docstring promise.
+slow-rate / queue-depth state, using Flask's test client directly against
+the real app module - no mocking of the project's own code. Covers the
+documented behavior: GET / and /metrics, and GET/POST /error-rate,
+/slow-rate, and /queue-depth including the clamping and validation
+docs/README.md and the module's own docstring promise.
 """
 import importlib
 import sys
@@ -21,6 +21,7 @@ app_module = importlib.import_module("app")
 def client():
     app_module.set_error_rate(0.001)
     app_module.set_slow_rate(0.001)
+    app_module.set_queue_depth_target(5.0)
     return app_module.app.test_client()
 
 
@@ -31,6 +32,7 @@ def test_index_reports_service_name_and_current_state(client):
     assert body["service"] == "sample-service"
     assert body["error_rate"] == pytest.approx(0.001)
     assert body["slow_rate"] == pytest.approx(0.001)
+    assert body["queue_depth_target"] == pytest.approx(5.0)
     assert "traffic_rps" in body
 
 
@@ -54,6 +56,18 @@ def test_metrics_endpoint_exposes_the_latency_histogram_with_the_slo_bucket(clie
     body = response.get_data(as_text=True)
     assert "http_request_duration_seconds_bucket" in body
     assert 'le="0.3"' in body
+
+
+def test_metrics_endpoint_exposes_the_queue_depth_gauge(client):
+    """prometheus/saturation_recording_rules.yml reads
+    sample_service_queue_depth directly, so /metrics must expose it under
+    that exact metric name - a missing or renamed gauge would silently
+    zero out the saturation SLO.
+    """
+    app_module.QUEUE_DEPTH_GAUGE.set(42.0)
+    response = client.get("/metrics")
+    body = response.get_data(as_text=True)
+    assert "sample_service_queue_depth 42.0" in body
 
 
 def test_get_error_rate_route_returns_current_rate(client):
@@ -174,3 +188,70 @@ def test_error_rate_and_slow_rate_are_independent_knobs(client):
     assert app_module.get_slow_rate() == 0.1
     client.post("/slow-rate", json={"rate": 0.9})
     assert app_module.get_error_rate() == 0.9
+
+
+def test_get_queue_depth_route_returns_current_target(client):
+    app_module.set_queue_depth_target(25.0)
+    response = client.get("/queue-depth")
+    assert response.status_code == 200
+    assert response.get_json() == {"queue_depth_target": 25.0}
+
+
+def test_post_queue_depth_sets_and_returns_the_new_target(client):
+    response = client.post("/queue-depth", json={"target": 80})
+    assert response.status_code == 200
+    assert response.get_json() == {"queue_depth_target": 80.0}
+    assert app_module.get_queue_depth_target() == 80.0
+
+
+@pytest.mark.parametrize(
+    "requested,expected",
+    [
+        (600, 500.0),  # clamp above 500.0 (README/docstring: 0-500 range)
+        (-10, 0.0),  # clamp below 0.0
+        (0, 0.0),
+        (500, 500.0),
+    ],
+)
+def test_post_queue_depth_clamps_to_the_0_to_500_range(client, requested, expected):
+    response = client.post("/queue-depth", json={"target": requested})
+    assert response.status_code == 200
+    assert response.get_json() == {"queue_depth_target": expected}
+
+
+def test_post_queue_depth_without_target_field_is_a_400():
+    client = app_module.app.test_client()
+    response = client.post("/queue-depth", json={})
+    assert response.status_code == 400
+    assert "target" in response.get_json()["error"]
+
+
+def test_post_queue_depth_with_non_numeric_target_is_a_400():
+    client = app_module.app.test_client()
+    response = client.post("/queue-depth", json={"target": "not-a-number"})
+    assert response.status_code == 400
+
+
+def test_post_queue_depth_with_no_body_is_a_400():
+    client = app_module.app.test_client()
+    response = client.post("/queue-depth")
+    assert response.status_code == 400
+
+
+def test_set_queue_depth_does_not_mutate_state_on_invalid_input(client):
+    app_module.set_queue_depth_target(30.0)
+    client.post("/queue-depth", json={"target": "nope"})
+    assert app_module.get_queue_depth_target() == 30.0
+
+
+def test_queue_depth_is_independent_of_error_rate_and_slow_rate(client):
+    """app.py's docstring promises /error-rate, /slow-rate, and
+    /queue-depth are independent controls - setting one must not perturb
+    the other two.
+    """
+    app_module.set_error_rate(0.4)
+    app_module.set_slow_rate(0.1)
+    app_module.set_queue_depth_target(10.0)
+    client.post("/queue-depth", json={"target": 90})
+    assert app_module.get_error_rate() == 0.4
+    assert app_module.get_slow_rate() == 0.1

@@ -88,9 +88,9 @@ def test_promtool_check_config_passes():
 
 
 def test_promtool_check_rules_passes():
-    # Mirrors `make check-prometheus`, which validates all four rule files -
-    # the two availability ones plus the latency ones added alongside the
-    # second SLO - not just the availability pair.
+    # Mirrors `make check-prometheus`, which validates all six rule files -
+    # the availability and latency pairs plus the saturation pair added
+    # alongside the third SLO - not just the first two SLOs.
     result = _run_promtool(
         "check",
         "rules",
@@ -98,6 +98,8 @@ def test_promtool_check_rules_passes():
         "prometheus/alerting_rules.yml",
         "prometheus/latency_recording_rules.yml",
         "prometheus/latency_alerting_rules.yml",
+        "prometheus/saturation_recording_rules.yml",
+        "prometheus/saturation_alerting_rules.yml",
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -118,4 +120,15 @@ def test_promtool_rule_unit_tests_pass():
     tier's boundary behavior fails here instead of only in production.
     """
     result = _run_promtool("test", "rules", "tests/promtool/rules_test.yml")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_promtool_saturation_rule_unit_tests_pass():
+    """Phase 4's saturation SLO gets its own promtool unit-test file,
+    tests/promtool/saturation_rules_test.yml, since its gauge-to-indicator
+    recording rule (prometheus/saturation_recording_rules.yml) needs
+    different input series than the counter-based availability/latency
+    rules the other unit-test file exercises.
+    """
+    result = _run_promtool("test", "rules", "tests/promtool/saturation_rules_test.yml")
     assert result.returncode == 0, result.stdout + result.stderr

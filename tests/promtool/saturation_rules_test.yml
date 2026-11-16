@@ -1,0 +1,160 @@
+# promtool unit tests for prometheus/saturation_alerting_rules.yml.
+#
+# Unlike the availability/latency rule files, the saturation signal
+# (sample_service_queue_depth) is a gauge, not a counter, so
+# prometheus/saturation_recording_rules.yml first turns it into a 1/0
+# "is the queue over 50 items right now" indicator before averaging it over
+# each window - see docs/runbook.md#saturation-slo. That means the input
+# series below are raw gauge values (not "a+bxN" counter growth), and the
+# achievable burn-rate resolution is limited by how many evaluation steps
+# fit inside a window, not by continuous math.
+#
+# Tier 1 (fast) gets a real boundary test: a repeating 5-step pattern with
+# 1-in-5 samples over threshold (fraction ~0.206 -> burn ~10.3x, under the
+# 14.4x threshold) vs 2-in-5 (fraction ~0.405 -> burn ~20.2x, over it).
+# Tiers 2-4 use the simplest possible boundary instead - queue depth
+# pinned at 10 (always healthy, burn 0x) vs pinned at 80 (always over the
+# 50-item threshold, burn 50x) - since at those tiers' longer intervals a
+# single evaluation step already swings the ratio past the tier's
+# threshold, so a tight percentage split isn't meaningful (and is exactly
+# the resolution tradeoff the runbook documents).
+#
+# Run via: docker run --rm -v "$PWD":/work -w /work --entrypoint promtool
+#   prom/prometheus:latest test rules tests/promtool/saturation_rules_test.yml
+# (see tests/promtool/test_promtool.py, which runs exactly that).
+rule_files:
+  - ../../prometheus/saturation_recording_rules.yml
+  - ../../prometheus/saturation_alerting_rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # --- Tier 1: SampleServiceSaturationBudgetBurnFast (1h & 5m windows, >=14.4x, for: 2m) ---
+  - interval: 30s
+    input_series:
+      - series: 'sample_service_queue_depth{job="sample-service"}'
+        values: '80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80 10 10 10 10 80'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: SampleServiceSaturationBudgetBurnFast
+        exp_alerts: []
+
+  - interval: 30s
+    input_series:
+      - series: 'sample_service_queue_depth{job="sample-service"}'
+        values: '80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80 80 10 10 10 80'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: SampleServiceSaturationBudgetBurnFast
+        exp_alerts:
+          - exp_labels:
+              job: sample-service
+              severity: critical
+              slo: sample-service-saturation
+              window: fast
+            exp_annotations:
+              summary: "sample-service is burning its saturation budget >14x too fast"
+              description: >-
+                The fraction of time the work queue spent over its 50-item
+                saturation threshold, over the last 1h AND the last 5m, both
+                exceed 14.4x the allowed SLO burn rate for the 98%
+                not-saturated objective. At this rate the 30-day saturation
+                budget is exhausted in ~2 days. See
+                docs/runbook.md#saturation-slo.
+
+  # --- Tier 2: SampleServiceSaturationBudgetBurnMediumFast (6h & 30m windows, >=6x, for: 15m) ---
+  - interval: 5m
+    input_series:
+      - series: 'sample_service_queue_depth{job="sample-service"}'
+        values: '10+0x80'
+    alert_rule_test:
+      - eval_time: 6h40m
+        alertname: SampleServiceSaturationBudgetBurnMediumFast
+        exp_alerts: []
+
+  - interval: 5m
+    input_series:
+      - series: 'sample_service_queue_depth{job="sample-service"}'
+        values: '80+0x80'
+    alert_rule_test:
+      - eval_time: 6h40m
+        alertname: SampleServiceSaturationBudgetBurnMediumFast
+        exp_alerts:
+          - exp_labels:
+              job: sample-service
+              severity: critical
+              slo: sample-service-saturation
+              window: medium-fast
+            exp_annotations:
+              summary: "sample-service is burning its saturation budget >6x too fast"
+              description: >-
+                The fraction of time the work queue spent over its 50-item
+                saturation threshold, over the last 6h AND the last 30m, both
+                exceed 6x the allowed SLO burn rate for the 98% not-saturated
+                objective. At this rate the 30-day saturation budget is
+                exhausted in ~5 days. See docs/runbook.md#saturation-slo.
+
+  # --- Tier 3: SampleServiceSaturationBudgetBurnSlow (1d & 2h windows, >=3x, for: 1h) ---
+  - interval: 30m
+    input_series:
+      - series: 'sample_service_queue_depth{job="sample-service"}'
+        values: '10+0x52'
+    alert_rule_test:
+      - eval_time: 26h
+        alertname: SampleServiceSaturationBudgetBurnSlow
+        exp_alerts: []
+
+  - interval: 30m
+    input_series:
+      - series: 'sample_service_queue_depth{job="sample-service"}'
+        values: '80+0x52'
+    alert_rule_test:
+      - eval_time: 26h
+        alertname: SampleServiceSaturationBudgetBurnSlow
+        exp_alerts:
+          - exp_labels:
+              job: sample-service
+              severity: warning
+              slo: sample-service-saturation
+              window: slow
+            exp_annotations:
+              summary: "sample-service is burning its saturation budget 3x too fast"
+              description: >-
+                The fraction of time the work queue spent over its 50-item
+                saturation threshold, over the last 1d AND the last 2h, both
+                exceed 3x the allowed SLO burn rate for the 98% not-saturated
+                objective. At this rate the 30-day saturation budget is
+                exhausted in ~10 days. See docs/runbook.md#saturation-slo.
+
+  # --- Tier 4: SampleServiceSaturationBudgetBurnVerySlow (3d & 6h windows, >=1x, for: 3h) ---
+  - interval: 1h
+    input_series:
+      - series: 'sample_service_queue_depth{job="sample-service"}'
+        values: '10+0x78'
+    alert_rule_test:
+      - eval_time: 3d6h
+        alertname: SampleServiceSaturationBudgetBurnVerySlow
+        exp_alerts: []
+
+  - interval: 1h
+    input_series:
+      - series: 'sample_service_queue_depth{job="sample-service"}'
+        values: '80+0x78'
+    alert_rule_test:
+      - eval_time: 3d6h
+        alertname: SampleServiceSaturationBudgetBurnVerySlow
+        exp_alerts:
+          - exp_labels:
+              job: sample-service
+              severity: warning
+              slo: sample-service-saturation
+              window: very-slow
+            exp_annotations:
+              summary: "sample-service is on track to exhaust its 30-day saturation budget"
+              description: >-
+                The fraction of time the work queue spent over its 50-item
+                saturation threshold, over the last 3d AND the last 6h, both
+                exceed the allowed SLO burn rate for the 98% not-saturated
+                objective. At this rate the 30-day saturation budget will be
+                fully exhausted by the end of the period. See
+                docs/runbook.md#saturation-slo.
