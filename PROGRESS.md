@@ -3,33 +3,34 @@
 ## Vision
 
 A reference implementation of Google SRE-style multi-window multi-burn-rate
-alerting: Prometheus recording rules and Alertmanager routes for two
-independent SLOs (availability and latency) on a sample service, with a
-runbook explaining the math and false-positive tradeoffs.
+alerting: Prometheus recording rules and Alertmanager routes for three
+independent SLOs (availability, latency, and saturation) on a sample
+service, with a runbook explaining the math and false-positive tradeoffs.
 
 ## Architecture
 
 ```
 sample-service (Flask + prometheus_client)
-    - exposes /metrics (http_requests_total{code}, http_request_duration_seconds)
-    - POST /error-rate and POST /slow-rate let a demo script simulate an incident
+    - exposes /metrics (http_requests_total{code}, http_request_duration_seconds,
+      sample_service_queue_depth)
+    - POST /error-rate, POST /slow-rate, POST /queue-depth let a demo script simulate an incident
         |
         v
 Prometheus
     - scrapes sample-service
-    - recording_rules.yml + latency_recording_rules.yml: error ratio /
-      latency ratio + burn rate, each over 7 windows (5m, 30m, 1h, 2h, 6h,
-      1d, 3d)
-    - alerting_rules.yml + latency_alerting_rules.yml: 4 multi-window
-      multi-burn-rate alert tiers per SLO (8 alerts total)
+    - recording_rules.yml + latency_recording_rules.yml + saturation_recording_rules.yml:
+      error ratio / latency ratio / saturation ratio + burn rate, each over
+      7 windows (5m, 30m, 1h, 2h, 6h, 1d, 3d)
+    - alerting_rules.yml + latency_alerting_rules.yml + saturation_alerting_rules.yml:
+      4 multi-window multi-burn-rate alert tiers per SLO (12 alerts total)
         |              \
         v               v
 Alertmanager          Grafana
     - routes severity=critical       - provisioned dashboard: burn rate
-      -> "page" receiver               per window (both SLOs), error-budget
-    - routes severity=warning          gauge, p99 latency estimate,
-      -> "ticket" receiver               request/error rate, live alerts
-    - inhibits slower tiers once a
+      -> "page" receiver               per window (all 3 SLOs), error-budget
+    - routes severity=warning          gauge, p99 latency estimate, queue
+      -> "ticket" receiver               depth vs threshold, request/error
+    - inhibits slower tiers once a      rate, live alerts
       faster tier is already firing (per SLO)
 ```
 
@@ -116,7 +117,7 @@ the availability SLO; the latency SLO is driven the same way via
       (`make up`, `make check`, `make lint`, `make burn`/`make reset`, the
       `/slow-rate` curls, `make down`) - all passed as written
 
-### Also fixed this session
+### Also fixed in the Phase 3 session
 
 - [x] CI was red on PR #1 (`validate-prometheus-config` and
       `validate-alertmanager-config` both failing): those jobs ran inside
@@ -129,21 +130,50 @@ the availability SLO; the latency SLO is driven the same way via
       validate correctly via `docker run` against a mounted volume (the
       same thing `make check` has always done locally).
 
+### Phase 4 - Third SLO shape: saturation on a gauge (done)
+
+- [x] `sample-service/app.py`: a `sample_service_queue_depth` Gauge and a
+      `/queue-depth` knob (mirroring `/error-rate`/`/slow-rate`) that sets
+      the target depth the synthetic traffic loop jitters around each tick
+- [x] `prometheus/saturation_recording_rules.yml`: the adaptation this
+      phase exists to demonstrate - `sample_service:queue_saturated:bool`
+      turns the gauge into a `1`/`0` indicator via `> bool 50` on every
+      evaluation (which itself becomes a real recorded time series), then
+      `avg_over_time()` over the same 7 windows gives "fraction of time
+      saturated", the same ratio shape as the error/latency ratios; burn
+      rate divides by the budget (`0.02`) exactly as before
+- [x] `prometheus/saturation_alerting_rules.yml`: the identical 4-tier
+      thresholds/`for` durations, `slo: sample-service-saturation`, routes
+      through the existing severity-based Alertmanager rules unchanged
+- [x] `prometheus/prometheus.yml` + `Makefile`'s `check-prometheus`:
+      wired in the two new rule files
+- [x] `grafana/dashboards/slo-burn-rate.json`: 3 new panels - saturation
+      burn rate by window, queue depth vs the 50-item threshold, and the
+      live saturation alert table
+- [x] `docs/runbook.md`: new "Saturation SLO" section explaining the
+      gauge-to-indicator adaptation and its cost (resolution capped at
+      `evaluation_interval`, so a sub-15s spike can average away)
+- [x] `docs/architecture.png` regenerated to show all 3 SLOs end to end
+- [x] README: third SLO documented in the quick start, the SLO table, the
+      architecture diagram, and the repository layout; 3 new preview
+      screenshots (saturation alerts, saturation burn-rate graph, Grafana
+      saturation panels)
+- [x] Ran the real stack: `POST /queue-depth {"target": 80}` drove all 4
+      saturation alert tiers from `inactive` through `pending` to
+      `firing`, confirmed via the live Prometheus rules API
+
 ## Resume point
 
-All three phases are complete. The full test suite passes (65 passed, 1
+All four phases are complete. The full test suite passes (113 passed, 1
 skipped - the skip is an environment-gated integration test), `make check`
 and `make lint` pass, and the real docker-compose stack was exercised live
-this session for both SLOs: raising `/error-rate` and `/slow-rate` each
-drove all 4 of their respective alert tiers from `inactive` through
-`pending` to `firing`, routed correctly in Alertmanager, with Grafana
-panels updating live throughout.
+this session for all 3 SLOs: raising `/error-rate`, `/slow-rate`, and
+`/queue-depth` each drove all 4 of their respective alert tiers from
+`inactive` through `pending` to `firing`, routed correctly in
+Alertmanager, with Grafana panels updating live throughout.
 
 Ideas for a future session (not required, nothing left is broken):
 
-- A third SLO example on a metric shape that *isn't* a simple
-  good/bad-event ratio (e.g. a saturation-style SLO on a gauge), to show
-  where the burn-rate method needs adaptation versus where it doesn't.
 - A `docker-compose.ci.yml` profile that runs the full stack in CI and
   asserts against the live Prometheus/Alertmanager APIs, instead of only
   config-validating the YAML (what `tests/integration/test_stack.py`
