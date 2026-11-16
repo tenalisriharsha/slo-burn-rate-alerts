@@ -21,7 +21,8 @@ check-prometheus:
 	docker run --rm -v "$$PWD/prometheus:/etc/prometheus:ro" \
 		--entrypoint promtool prom/prometheus:latest \
 		check rules /etc/prometheus/recording_rules.yml /etc/prometheus/alerting_rules.yml \
-		/etc/prometheus/latency_recording_rules.yml /etc/prometheus/latency_alerting_rules.yml
+		/etc/prometheus/latency_recording_rules.yml /etc/prometheus/latency_alerting_rules.yml \
+		/etc/prometheus/saturation_recording_rules.yml /etc/prometheus/saturation_alerting_rules.yml
 
 check-alertmanager:
 	docker run --rm -v "$$PWD/alertmanager:/etc/alertmanager:ro" \

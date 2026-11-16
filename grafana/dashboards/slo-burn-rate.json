@@ -201,6 +201,85 @@
           "instant": true
         }
       ]
+    },
+    {
+      "id": 8,
+      "title": "Saturation Burn Rate by Window",
+      "description": "sample_service:saturation_burnrate<window> for all 7 windows used by the 4 saturation alert tiers in prometheus/saturation_alerting_rules.yml (queue depth stays under 50 items at least 98% of the time). Same thresholds and interpretation as the other two burn-rate panels, but built on a gauge instead of a counter - see docs/runbook.md#saturation-slo.",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 34 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 0 },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        { "refId": "A", "expr": "sample_service:saturation_burnrate5m", "legendFormat": "5m" },
+        { "refId": "B", "expr": "sample_service:saturation_burnrate30m", "legendFormat": "30m" },
+        { "refId": "C", "expr": "sample_service:saturation_burnrate1h", "legendFormat": "1h" },
+        { "refId": "D", "expr": "sample_service:saturation_burnrate2h", "legendFormat": "2h" },
+        { "refId": "E", "expr": "sample_service:saturation_burnrate6h", "legendFormat": "6h" },
+        { "refId": "F", "expr": "sample_service:saturation_burnrate1d", "legendFormat": "1d" },
+        { "refId": "G", "expr": "sample_service:saturation_burnrate3d", "legendFormat": "3d" }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Queue Depth vs Saturation Threshold",
+      "description": "sample_service_queue_depth against the 50-item saturation threshold used by sample_service:queue_saturated:bool in prometheus/saturation_recording_rules.yml.",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 34 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sample_service_queue_depth{job=\"sample-service\"}",
+          "legendFormat": "queue depth"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Active Saturation SLO Alerts",
+      "description": "ALERTS{slo=\"sample-service-saturation\"} - the live state of all 4 saturation burn-rate alert tiers as evaluated by Prometheus.",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 43 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ALERTS{slo=\"sample-service-saturation\"}",
+          "format": "table",
+          "instant": true
+        }
+      ]
     }
   ]
 }

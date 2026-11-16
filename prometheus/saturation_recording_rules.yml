@@ -1,0 +1,55 @@
+groups:
+  # Saturation SLOs are measured on a gauge (queue depth, pool utilization,
+  # ...), not a good/bad event ratio, so there is no rate(bad)/rate(total)
+  # to take directly. The fix is this first group: a recording rule samples
+  # the gauge against its saturation threshold on every evaluation
+  # (`> bool` turns the comparison into 1/0 instead of a filter), which
+  # writes a brand new, regular time series into Prometheus. Once that
+  # series exists, avg_over_time() in the next group gives "fraction of
+  # time spent saturated" over any window - the exact same ratio shape as
+  # sample_service:error_ratio:rateX / sample_service:latency_ratio:rateX,
+  # and the burn-rate math after that is unchanged.
+  - name: sample-service.slo.saturation-indicator
+    rules:
+      - record: sample_service:queue_saturated:bool
+        expr: sample_service_queue_depth{job="sample-service"} > bool 50
+
+  - name: sample-service.slo.saturation-ratio
+    rules:
+      - record: sample_service:saturation_ratio:rate5m
+        expr: avg_over_time(sample_service:queue_saturated:bool[5m])
+      - record: sample_service:saturation_ratio:rate30m
+        expr: avg_over_time(sample_service:queue_saturated:bool[30m])
+      - record: sample_service:saturation_ratio:rate1h
+        expr: avg_over_time(sample_service:queue_saturated:bool[1h])
+      - record: sample_service:saturation_ratio:rate2h
+        expr: avg_over_time(sample_service:queue_saturated:bool[2h])
+      - record: sample_service:saturation_ratio:rate6h
+        expr: avg_over_time(sample_service:queue_saturated:bool[6h])
+      - record: sample_service:saturation_ratio:rate1d
+        expr: avg_over_time(sample_service:queue_saturated:bool[1d])
+      - record: sample_service:saturation_ratio:rate3d
+        expr: avg_over_time(sample_service:queue_saturated:bool[3d])
+
+  - name: sample-service.slo.saturation-burnrate
+    rules:
+      # SLO = queue depth stays under 50 items at least 98% of the time,
+      # over a rolling 30 day window -> error budget = 1 - 0.98 = 0.02.
+      # burnrate = saturation_ratio / error_budget, same abstraction as
+      # the availability and latency burn rates, just with a different
+      # budget constant and a boolean-indicator ratio instead of a
+      # rate()-based one.
+      - record: sample_service:saturation_burnrate5m
+        expr: sample_service:saturation_ratio:rate5m / 0.02
+      - record: sample_service:saturation_burnrate30m
+        expr: sample_service:saturation_ratio:rate30m / 0.02
+      - record: sample_service:saturation_burnrate1h
+        expr: sample_service:saturation_ratio:rate1h / 0.02
+      - record: sample_service:saturation_burnrate2h
+        expr: sample_service:saturation_ratio:rate2h / 0.02
+      - record: sample_service:saturation_burnrate6h
+        expr: sample_service:saturation_ratio:rate6h / 0.02
+      - record: sample_service:saturation_burnrate1d
+        expr: sample_service:saturation_ratio:rate1d / 0.02
+      - record: sample_service:saturation_burnrate3d
+        expr: sample_service:saturation_ratio:rate3d / 0.02
