@@ -161,16 +161,70 @@ To demo it: `POST /slow-rate` on the sample service (mirroring
 `sample_service:latency_burnrate*` up the same way raising `/error-rate`
 pushes `sample_service:burnrate*` up.
 
+## Saturation SLO
+
+`sample-service` also carries a third, independent SLO: a **queue depth
+under 50 items at least 98% of the time**, over a rolling 30-day window -
+a saturation objective, standing in for any resource-utilization signal
+(queue depth, worker-pool occupancy, connection-pool usage, disk headroom,
+...) a real service might track. Unlike the two SLOs above, this one is
+not a good/bad event ratio: `sample_service_queue_depth` is a **gauge**,
+not a counter, so there's no `rate(bad_events) / rate(total_events)` to
+take in the first place.
+
+[`prometheus/saturation_recording_rules.yml`](../prometheus/saturation_recording_rules.yml)
+bridges that gap in two steps:
+
+1. `sample_service:queue_saturated:bool` records
+   `sample_service_queue_depth > bool 50` on every evaluation. The `> bool`
+   operator turns the comparison into a `1`/`0` value instead of filtering
+   the series away, which - critically - makes this itself a regular time
+   series in Prometheus's storage, sampled once per `evaluation_interval`.
+2. `sample_service:saturation_ratio:rate<window>` then takes
+   `avg_over_time()` of that `1`/`0` series over each of the same seven
+   windows used by the other two SLOs. Averaging a `1`/`0` series over a
+   window *is* "fraction of time spent in that state" - the same ratio
+   shape as `error_ratio` and `latency_ratio`, just built from
+   `avg_over_time()` on a derived indicator instead of `rate()` on a raw
+   counter.
+
+From there, nothing changes: `sample_service:saturation_burnrate<window>`
+divides by the error budget (`1 - 0.98 = 0.02`) exactly like the other two
+SLOs, and
+[`prometheus/saturation_alerting_rules.yml`](../prometheus/saturation_alerting_rules.yml)
+reuses the identical four thresholds and `for` durations, with
+`slo: sample-service-saturation` routing through the same severity-based
+Alertmanager rules with no changes needed there.
+
+This is the point the previous two SLOs couldn't make on their own: the
+multi-window multi-burn-rate *method* generalizes to any metric that can be
+reduced to "fraction of time/requests in a bad state" - which covers far
+more than simple event ratios - but gauge-shaped signals need that one
+extra recording-rule step to get there. The adaptation does cost something:
+the indicator is only as fine-grained as `evaluation_interval` (15s here),
+so a saturation spike shorter than that can be averaged away entirely,
+whereas the counter-based SLOs capture every single request regardless of
+how briefly it was bad.
+
+To demo it: `POST /queue-depth` on the sample service (mirroring
+`POST /error-rate` and `POST /slow-rate`) sets the target queue depth the
+synthetic traffic loop jitters around, which pushes
+`sample_service:saturation_burnrate*` up the same way raising
+`/error-rate` or `/slow-rate` pushes the other two burn rates up.
+
 ## Tuning for your own service
 
 For each SLO, the constant that's specific to *that* SLO (not to the
 method) lives in one place: the `0.001` divisor in
 [`prometheus/recording_rules.yml`](../prometheus/recording_rules.yml) for
-availability, or the `0.01` divisor in
+availability, the `0.01` divisor in
 [`prometheus/latency_recording_rules.yml`](../prometheus/latency_recording_rules.yml)
-for latency - both are `1 - target`. Changing an SLO's target means
-changing that one number; the burn-rate thresholds (14.4, 6, 3, 1) stay the
-same regardless of what the target is, because they're expressed in
-multiples of whatever the budget is - that's the whole point of the
-burn-rate abstraction, and exactly why the latency SLO above could reuse
-the same four tiers unchanged.
+for latency, or the `0.02` divisor and the `50`-item threshold in
+[`prometheus/saturation_recording_rules.yml`](../prometheus/saturation_recording_rules.yml)
+for saturation - the budget divisors are all `1 - target`. Changing an
+SLO's target means changing that one number (plus the threshold constant
+for a gauge-based SLO like saturation); the burn-rate thresholds (14.4, 6,
+3, 1) stay the same regardless of what the target is, because they're
+expressed in multiples of whatever the budget is - that's the whole point
+of the burn-rate abstraction, and exactly why the latency and saturation
+SLOs above could both reuse the same four tiers unchanged.
