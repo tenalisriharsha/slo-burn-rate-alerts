@@ -46,6 +46,24 @@ def test_dashboard_includes_the_saturation_panels():
     assert "Active Saturation SLO Alerts" in titles
 
 
+def test_request_vs_error_rate_panel_queries_the_documented_recording_rules():
+    dashboard = _load_dashboard()
+    panel = next(
+        p for p in dashboard["panels"] if p["title"] == "Request Rate vs Error Rate (5m)"
+    )
+    exprs = {t["expr"] for t in panel["targets"]}
+    assert "sample_service:requests:rate5m" in exprs
+    assert "sample_service:errors:rate5m" in exprs
+
+
+def test_p99_latency_panel_queries_the_0_99_quantile_of_the_duration_histogram():
+    dashboard = _load_dashboard()
+    panel = next(p for p in dashboard["panels"] if p["title"] == "p99 Latency Estimate")
+    expr = panel["targets"][0]["expr"]
+    assert "histogram_quantile(0.99," in expr
+    assert "http_request_duration_seconds_bucket" in expr
+
+
 def test_latency_burn_rate_panel_covers_all_seven_windows():
     dashboard = _load_dashboard()
     panel = next(p for p in dashboard["panels"] if p["title"] == "Latency Burn Rate by Window")

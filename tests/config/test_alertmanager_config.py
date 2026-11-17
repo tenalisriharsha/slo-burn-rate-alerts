@@ -3,6 +3,7 @@ routing to page/ticket (README.md, docs/runbook.md) and the inhibition
 chain that stops a faster tier's incident from also filing a slower
 tier's ticket (PROGRESS.md phase 1/2, docs/integrations.md).
 """
+import re
 from pathlib import Path
 
 import yaml
@@ -47,6 +48,24 @@ def test_page_and_ticket_receivers_have_no_active_integration_by_default():
         if receiver["name"] in ("page", "ticket"):
             assert "pagerduty_configs" not in receiver
             assert "slack_configs" not in receiver
+
+
+def test_commented_pagerduty_and_slack_blocks_use_env_var_placeholders_only():
+    """docs/integrations.md tells users to set an env var and uncomment the
+    block, never to paste a credential in directly. YAML-structural checks
+    (and `amtool check-config`) can't see commented-out lines at all, so a
+    key/URL literal pasted in place of ${VAR} - leaving the line commented,
+    or even after uncommenting - would pass every other check here.
+    """
+    text = CONFIG_FILE.read_text()
+    for line in text.splitlines():
+        stripped = line.strip().lstrip("#").strip()
+        match = re.match(r"(routing_key|api_url):\s*'([^']*)'", stripped)
+        if match:
+            value = match.group(2)
+            assert value.startswith("${") and value.endswith("}"), (
+                f"expected an env-var placeholder, found a literal value: {line!r}"
+            )
 
 
 def test_inhibit_rules_form_a_chain_from_fast_down_to_very_slow():
