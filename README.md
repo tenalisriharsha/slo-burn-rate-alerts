@@ -282,9 +282,11 @@ routing, the demo stack, and the runbook), the Grafana dashboard and
 scripted incident demo, real Slack/PagerDuty integration instructions, and
 two additional independent SLOs (latency, p99 < 300ms; saturation, queue
 depth < 50 items) reusing the identical burn-rate method are complete and
-tested end-to-end against a real running stack. See
-[PROGRESS.md](PROGRESS.md) for the full phase-by-phase history and what's
-planned next.
+tested end-to-end against a real running stack. CI itself brings up the
+real `docker-compose` stack and asserts against the live Prometheus and
+Alertmanager APIs (`integration-test` job), not just config-validates the
+YAML. See [PROGRESS.md](PROGRESS.md) for the full phase-by-phase history
+and what's planned next.
 
 ## License
 

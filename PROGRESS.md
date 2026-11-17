@@ -162,25 +162,48 @@ the availability SLO; the latency SLO is driven the same way via
       saturation alert tiers from `inactive` through `pending` to
       `firing`, confirmed via the live Prometheus rules API
 
+### Phase 5 - Run the real stack in CI, not just validate its YAML (done)
+
+- [x] `.github/workflows/ci.yml`: new `integration-test` job that installs
+      the sample-service's runtime deps + `pytest`/`requests` and runs
+      `RUN_INTEGRATION=1 pytest tests/integration -m integration -v` on the
+      standard `ubuntu-latest` runner (Docker and Docker Compose are
+      preinstalled there, so no extra setup step is needed). This is
+      exactly `tests/integration/test_stack.py`, previously only runnable
+      locally - it brings up the real `sample-service` + `prometheus` +
+      `alertmanager` containers, drives a simulated incident through each
+      of the error-rate and queue-depth knobs, and asserts the fast-tier
+      alert for both the availability and saturation SLOs reaches
+      `state=firing` in Prometheus and shows up in Alertmanager routed
+      with `severity=critical` - closing the gap the other CI jobs leave
+      (`validate-prometheus-config`/`validate-alertmanager-config` only
+      config-validate the YAML; `test-sample-service` skips the
+      integration test by default per `tests/conftest.py`)
+- [x] Ran the real thing locally exactly as the new CI job will:
+      `RUN_INTEGRATION=1 pytest tests/integration -m integration -v`
+      against a clean `docker compose` stack - both tests passed, each
+      fast-tier alert reached `firing` and routed to `page` in
+      Alertmanager
+- [x] README's Status section now mentions CI exercises the live stack,
+      not only its config
+
 ## Resume point
 
-All four phases are complete. The full test suite passes (113 passed, 1
-skipped - the skip is an environment-gated integration test), `make check`
-and `make lint` pass, and the real docker-compose stack was exercised live
-this session for all 3 SLOs: raising `/error-rate`, `/slow-rate`, and
-`/queue-depth` each drove all 4 of their respective alert tiers from
-`inactive` through `pending` to `firing`, routed correctly in
-Alertmanager, with Grafana panels updating live throughout.
+All five phases are complete. The full test suite passes (164 passed, 2
+skipped - the 2 skips are the Docker-gated integration tests, which were
+also run explicitly this session and passed), `make check` and `make
+lint` pass, and the real docker-compose stack was exercised live again
+this session.
 
 Ideas for a future session (not required, nothing left is broken):
 
-- A `docker-compose.ci.yml` profile that runs the full stack in CI and
-  asserts against the live Prometheus/Alertmanager APIs, instead of only
-  config-validating the YAML (what `tests/integration/test_stack.py`
-  already does locally, gated on Docker being available).
 - Rotating/randomized synthetic traffic patterns (daily seasonality) so the
   burn-rate graphs in the README screenshots look less like a flat line
   before an incident.
+- The `integration-test` CI job takes several minutes (it waits for a real
+  burn-rate window to clear its threshold) - if that becomes annoying on
+  every PR, consider gating it to `push` on `main` only, or adding
+  `workflow_dispatch` so it can also be run on demand.
 
 ## Known gap: published repo is stale
 
