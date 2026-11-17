@@ -33,7 +33,7 @@ def test_index_reports_service_name_and_current_state(client):
     assert body["error_rate"] == pytest.approx(0.001)
     assert body["slow_rate"] == pytest.approx(0.001)
     assert body["queue_depth_target"] == pytest.approx(5.0)
-    assert "traffic_rps" in body
+    assert body["traffic_rps"] == pytest.approx(app_module._traffic_rps)
 
 
 def test_metrics_endpoint_exposes_prometheus_text_format(client):
@@ -44,6 +44,7 @@ def test_metrics_endpoint_exposes_prometheus_text_format(client):
     body = response.get_data(as_text=True)
     assert "http_requests_total" in body
     assert 'code="200"' in body
+    assert 'method="GET"' in body
 
 
 def test_metrics_endpoint_exposes_the_latency_histogram_with_the_slo_bucket(client):
