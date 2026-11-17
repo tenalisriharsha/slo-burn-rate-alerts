@@ -54,10 +54,11 @@ real credentials).
 
 ## Test results
 
-Full suite: **113 passed, 1 skipped** (the skip is
-`tests/integration/test_stack.py`, gated on Docker being available - it
-passed when run against a live stack earlier in the project). Coverage
-spans:
+Full suite: **164 passed, 2 skipped** by default (the skips are
+`tests/integration/test_stack.py`'s two tests, gated on
+`RUN_INTEGRATION=1` - run explicitly, both passed against a live stack,
+each fast-tier alert reaching `firing` and routing to `page` in
+Alertmanager in under 6 minutes). Coverage spans:
 
 - `tests/unit/` - sample-service Flask routes and state
 - `tests/config/` - structural checks on the Prometheus/Alertmanager/
@@ -68,8 +69,10 @@ spans:
   asserts against it
 
 CI (`.github/workflows/ci.yml`) runs config validation, linting, and the
-test suite on every push/PR. The config-validation jobs were fixed this
-session - see below.
+test suite on every push/PR, plus a dedicated `integration-test` job that
+runs the Docker-gated end-to-end test against the real stack rather than
+only validating its YAML. The config-validation jobs were fixed earlier -
+see below.
 
 ## What was fixed
 
@@ -105,6 +108,7 @@ the same approach `make check` already used successfully.
 ## Future ideas
 
 See the "Resume point" section of [PROGRESS.md](PROGRESS.md) for a short
-list of possible follow-ups (a CI profile that exercises the live stack
-instead of only validating config; more realistic synthetic traffic
-patterns). None are required - the project as scoped is complete.
+list of possible follow-ups (more realistic synthetic traffic patterns;
+possibly gating the `integration-test` CI job to `push`/`workflow_dispatch`
+if its several-minutes runtime becomes annoying on every PR). None are
+required - the project as scoped is complete.
