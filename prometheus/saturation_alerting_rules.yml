@@ -1,5 +1,11 @@
 groups:
   - name: sample-service.slo.saturation-burnrate-alerts
+    # Matches the 15s interval override on the saturation recording-rule
+    # groups (prometheus/saturation_recording_rules.yml) so this group's
+    # `for:` pending timers advance on the same cadence the underlying
+    # burn-rate series actually updates, instead of drifting out of phase
+    # with it under a different global evaluation_interval.
+    interval: 15s
     rules:
       # Tier 1 - fast burn, pages. At this rate the full 30-day saturation
       # budget is exhausted in about 2 days.

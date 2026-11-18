@@ -187,13 +187,53 @@ the availability SLO; the latency SLO is driven the same way via
 - [x] README's Status section now mentions CI exercises the live stack,
       not only its config
 
+### Also fixed: flaky `test_promtool_saturation_rule_unit_tests_pass` on PR #3's CI
+
+- [x] CI's `test-sample-service` job was red on PR #3
+      (`tests/promtool/test_promtool.py::test_promtool_saturation_rule_unit_tests_pass`),
+      failing intermittently (not every run) at the fast tier's 65-minute
+      boundary case. Reproduced locally: looping the same `promtool test
+      rules tests/promtool/saturation_rules_test.yml` invocation 15 times
+      against the unchanged rule files failed ~20-30% of the time with
+      "got:[]" where an alert was expected, with no code or test change
+      between runs - a genuine race, not a one-off.
+- [x] Root cause: `prometheus/saturation_recording_rules.yml` split the
+      gauge-to-indicator adaptation across three separate rule groups
+      (`saturation-indicator` -> `saturation-ratio` -> `saturation-burnrate`),
+      each one's rules reading the previous group's recorded series.
+      Rules in the same group evaluate sequentially in listed order, but
+      Prometheus gives no ordering guarantee *between* groups - so the
+      downstream group can occasionally evaluate before the upstream
+      group's write for that cycle is visible, reading a one-cycle-stale
+      value. For the smooth rate()-based availability/latency ratios this
+      is invisible (one stale sample among many barely moves a rate());
+      for the saturation fast tier's tight repeating boundary pattern it
+      was enough to occasionally miss the window needed to hold `for: 2m`.
+- [x] Fix: collapsed all three groups into one
+      (`sample-service.slo.saturation-burnrate`), keeping the indicator /
+      ratio / burn-rate rules in the same dependency order they already
+      had - rules within a single group are guaranteed sequential, so each
+      rule now always sees the current cycle's value from every rule
+      before it. Also pinned that group's (and the saturation alerting
+      group's) `interval:` to 15s, matching `prometheus/prometheus.yml`'s
+      real `scrape_interval`/`evaluation_interval`, so the indicator's
+      resolution doesn't depend on whatever global interval a caller (such
+      as a promtool unit-test file) happens to set.
+- [x] Verified the fix, not just the theory: looped the same promtool
+      invocation against the fixed rule files 70 times total (two separate
+      runs of 30 and 40) with zero failures, versus the reproducible ~20-30%
+      failure rate beforehand. Ran the full pytest suite three times in a
+      row (182 passed, 2 skipped each time) and the real `make check` /
+      `make lint` / `RUN_INTEGRATION=1 pytest tests/integration` against a
+      live `docker compose` stack - all passed.
+
 ## Resume point
 
-All five phases are complete. The full test suite passes (164 passed, 2
-skipped - the 2 skips are the Docker-gated integration tests, which were
-also run explicitly this session and passed), `make check` and `make
-lint` pass, and the real docker-compose stack was exercised live again
-this session.
+All five phases are complete, and the flaky CI failure on PR #3 (above) is
+fixed and verified. The full test suite passes (182 passed, 2 skipped -
+the 2 skips are the Docker-gated integration tests, which were also run
+explicitly this session and passed), `make check` and `make lint` pass,
+and the real docker-compose stack was exercised live again this session.
 
 Ideas for a future session (not required, nothing left is broken):
 
