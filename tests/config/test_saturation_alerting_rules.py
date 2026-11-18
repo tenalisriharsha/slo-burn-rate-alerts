@@ -23,8 +23,12 @@ EXPECTED_TIERS = {
 }
 
 
+def _load_data() -> dict:
+    return yaml.safe_load(RULES_FILE.read_text())
+
+
 def _load_alerts() -> dict:
-    data = yaml.safe_load(RULES_FILE.read_text())
+    data = _load_data()
     alerts = {}
     for group in data["groups"]:
         for rule in group["rules"]:
@@ -102,3 +106,14 @@ def test_tier_thresholds_and_durations_match_the_availability_tiers(alertname):
     assert saturation_rule["for"] == availability_rule["for"]
     assert saturation_rule["labels"]["severity"] == availability_rule["labels"]["severity"]
     assert saturation_rule["labels"]["window"] == availability_rule["labels"]["window"]
+
+
+def test_alerting_group_interval_pinned_to_15s_matching_recording_rules():
+    """This group's `for:` pending timers must advance on the same 15s
+    cadence as prometheus/saturation_recording_rules.yml's burn-rate
+    series actually update on (see that file's matching `interval: 15s`
+    and PROGRESS.md's note on the fixed cross-group race), rather than
+    drifting out of phase under a different global evaluation_interval.
+    """
+    group = _load_data()["groups"][0]
+    assert group["interval"] == "15s"

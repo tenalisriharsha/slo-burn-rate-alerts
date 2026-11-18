@@ -132,3 +132,27 @@ def test_promtool_saturation_rule_unit_tests_pass():
     """
     result = _run_promtool("test", "rules", "tests/promtool/saturation_rules_test.yml")
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_promtool_saturation_rule_unit_tests_pass_repeatedly():
+    """Regression test for the flaky cross-group race described in
+    PROGRESS.md ("Also fixed: flaky test_promtool_saturation_rule_unit_tests_pass"):
+    prometheus/saturation_recording_rules.yml used to split the
+    indicator/ratio/burn-rate rules across three groups, which gave
+    Prometheus no guarantee they'd evaluate in lockstep, so the fast
+    tier's `for: 2m` boundary test failed roughly 20-30% of the time with
+    no code change between runs. The fix (collapsing them into one group,
+    PROGRESS.md) was verified by looping the same invocation 70 times with
+    zero failures; this test loops a smaller but still statistically
+    meaningful number of times so a reintroduction of the race - e.g. a
+    future change that splits the rules back into separate groups - fails
+    here instead of showing up as an intermittent CI failure days later.
+    """
+    failures = []
+    for i in range(20):
+        result = _run_promtool("test", "rules", "tests/promtool/saturation_rules_test.yml")
+        if result.returncode != 0:
+            failures.append((i, result.stdout + result.stderr))
+    assert not failures, (
+        f"{len(failures)}/20 runs failed (flaky race reintroduced): " + repr(failures[0])
+    )
