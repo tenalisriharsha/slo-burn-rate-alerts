@@ -54,7 +54,7 @@ real credentials).
 
 ## Test results
 
-Full suite: **164 passed, 2 skipped** by default (the skips are
+Full suite: **182 passed, 2 skipped** by default (the skips are
 `tests/integration/test_stack.py`'s two tests, gated on
 `RUN_INTEGRATION=1` - run explicitly, both passed against a live stack,
 each fast-tier alert reaching `firing` and routing to `page` in
@@ -83,6 +83,17 @@ CI was red on the first opened PR: `validate-prometheus-config` and
 minimal images. Fixed by running those jobs on the normal `ubuntu-latest`
 runner and validating via `docker run` against a mounted volume instead -
 the same approach `make check` already used successfully.
+
+A later PR's `test-sample-service` job was flaky: the saturation SLO's
+promtool unit test failed roughly 20-30% of the time with no code change
+between runs. Root cause was `prometheus/saturation_recording_rules.yml`
+splitting the gauge-to-indicator pipeline across three rule groups, each
+reading the previous one's output - Prometheus only guarantees sequential
+evaluation *within* a group, not across groups, so the downstream group
+could occasionally read a one-cycle-stale value. Fixed by collapsing the
+three groups into one (same rule order, now guaranteed sequential) and
+pinning its evaluation interval to match the real scrape interval.
+Verified with 70 consecutive promtool runs and zero failures.
 
 ## Known limitations
 
