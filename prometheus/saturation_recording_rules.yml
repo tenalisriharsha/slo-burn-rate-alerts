@@ -1,21 +1,34 @@
 groups:
   # Saturation SLOs are measured on a gauge (queue depth, pool utilization,
   # ...), not a good/bad event ratio, so there is no rate(bad)/rate(total)
-  # to take directly. The fix is this first group: a recording rule samples
+  # to take directly. The fix is this one group: a recording rule samples
   # the gauge against its saturation threshold on every evaluation
   # (`> bool` turns the comparison into 1/0 instead of a filter), which
-  # writes a brand new, regular time series into Prometheus. Once that
-  # series exists, avg_over_time() in the next group gives "fraction of
-  # time spent saturated" over any window - the exact same ratio shape as
-  # sample_service:error_ratio:rateX / sample_service:latency_ratio:rateX,
-  # and the burn-rate math after that is unchanged.
-  - name: sample-service.slo.saturation-indicator
+  # writes a brand new, regular time series into Prometheus; avg_over_time()
+  # over that series gives "fraction of time spent saturated" - the exact
+  # same ratio shape as sample_service:error_ratio:rateX /
+  # sample_service:latency_ratio:rateX - and the burn-rate math after that
+  # is unchanged. The indicator, ratio, and burn-rate rules below all live
+  # in this single group, each later rule depending on an earlier one and
+  # listed after it, rather than in three separate groups: rules in
+  # different groups are not guaranteed to evaluate in lockstep, so a
+  # dependent rule in its own group can race ahead of the rule it reads and
+  # observe a stale value, producing an intermittently wrong
+  # avg_over_time() result - seen as flaky promtool unit-test results at
+  # the fast tier's ~14.4x boundary before this was collapsed into one
+  # group. Rules within a single group always evaluate sequentially in
+  # listed order, so this ordering guarantees every later rule sees the
+  # current cycle's value from every earlier one.
+  - name: sample-service.slo.saturation-burnrate
+    # Pinned to the scrape_interval (prometheus/prometheus.yml) rather than
+    # inheriting the global evaluation_interval: a gauge-derived indicator
+    # is only as fine-grained as how often it gets sampled, so evaluating
+    # this group any slower than the scrape cadence aliases short spikes in
+    # and out of the recorded series depending on evaluation-grid phase.
+    interval: 15s
     rules:
       - record: sample_service:queue_saturated:bool
         expr: sample_service_queue_depth{job="sample-service"} > bool 50
-
-  - name: sample-service.slo.saturation-ratio
-    rules:
       - record: sample_service:saturation_ratio:rate5m
         expr: avg_over_time(sample_service:queue_saturated:bool[5m])
       - record: sample_service:saturation_ratio:rate30m
@@ -30,9 +43,6 @@ groups:
         expr: avg_over_time(sample_service:queue_saturated:bool[1d])
       - record: sample_service:saturation_ratio:rate3d
         expr: avg_over_time(sample_service:queue_saturated:bool[3d])
-
-  - name: sample-service.slo.saturation-burnrate
-    rules:
       # SLO = queue depth stays under 50 items at least 98% of the time,
       # over a rolling 30 day window -> error budget = 1 - 0.98 = 0.02.
       # burnrate = saturation_ratio / error_budget, same abstraction as
