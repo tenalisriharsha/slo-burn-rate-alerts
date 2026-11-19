@@ -227,19 +227,54 @@ the availability SLO; the latency SLO is driven the same way via
       `make lint` / `RUN_INTEGRATION=1 pytest tests/integration` against a
       live `docker compose` stack - all passed.
 
+### Phase 6 - Seasonal synthetic traffic (done)
+
+- [x] `sample-service/app.py`: request *volume* now follows a sine wave
+      (`seasonal_multiplier()`) on top of the configured base rate
+      (`TRAFFIC_RPS`), controlled by two new startup-only env vars -
+      `SEASONAL_AMPLITUDE` (default `0.5`, i.e. +/-50%) and
+      `SEASONAL_PERIOD_SECONDS` (default `900`). This addresses the gap
+      noted in the previous session's resume point: the request/error-rate
+      Grafana panel and README screenshots looked like a flat line before
+      an incident was simulated. The wave only scales how often synthetic
+      requests are generated - it never touches the error/slow/queue-depth
+      ratios the SLOs are evaluated against, so alert correctness and
+      timing are unaffected; `GET /` still reports the unscaled base
+      `traffic_rps` (unchanged, so the existing unit test asserting that
+      field against the module's base-rate variable still holds) alongside
+      a new `seasonal_multiplier` field for visibility.
+- [x] README: new "Configuration" section documenting all six
+      `sample-service` env vars (`ERROR_RATE`, `SLOW_RATE`,
+      `QUEUE_DEPTH_TARGET`, `TRAFFIC_RPS`, `SEASONAL_AMPLITUDE`,
+      `SEASONAL_PERIOD_SECONDS`), and a one-line mention of the wave in the
+      quick start's service bullet and the repository layout.
+- [x] No dashboard changes needed - `grafana/dashboards/slo-burn-rate.json`'s
+      "Request Rate vs Error Rate" panel already queries
+      `rate(http_requests_total[5m])`, so it picks up the new wave shape
+      automatically.
+- [x] Ran the real thing, not just unit tests: `make lint` clean; full
+      pytest suite (186 passed, 2 skipped - the 2 skips are the
+      Docker-gated integration tests); re-verified the saturation promtool
+      rule unit tests are still stable under the fix from the prior session
+      (5/5 consecutive runs, matching mount/invocation from
+      `tests/promtool/test_promtool.py`); brought up the real
+      `docker-compose` stack and confirmed `GET /` returns a live,
+      changing `seasonal_multiplier`; ran
+      `RUN_INTEGRATION=1 pytest tests/integration -m integration -v`
+      against that real stack - both the availability and saturation
+      fast-tier alerts still reached `firing` and routed to `page`
+      (340.93s, 2 passed), confirming the traffic wave doesn't disrupt
+      real alert timing.
+
 ## Resume point
 
-All five phases are complete, and the flaky CI failure on PR #3 (above) is
-fixed and verified. The full test suite passes (182 passed, 2 skipped -
-the 2 skips are the Docker-gated integration tests, which were also run
-explicitly this session and passed), `make check` and `make lint` pass,
-and the real docker-compose stack was exercised live again this session.
+All six phases are complete. The full test suite passes (186 passed, 2
+skipped - the 2 skips are the Docker-gated integration tests, which were
+also run explicitly this session against the real stack and passed),
+`make check` and `make lint` pass.
 
 Ideas for a future session (not required, nothing left is broken):
 
-- Rotating/randomized synthetic traffic patterns (daily seasonality) so the
-  burn-rate graphs in the README screenshots look less like a flat line
-  before an incident.
 - The `integration-test` CI job takes several minutes (it waits for a real
   burn-rate window to clear its threshold) - if that becomes annoying on
   every PR, consider gating it to `push` on `main` only, or adding
