@@ -31,7 +31,9 @@ This builds and starts four containers:
 
 - **sample-service** (`localhost:8000`) - a Flask app that exposes
   `/metrics` and continuously generates synthetic HTTP traffic at a
-  configurable error rate, slow-request rate, and queue depth
+  configurable error rate, slow-request rate, and queue depth; request
+  volume itself follows a slow sine wave so the traffic isn't a flat line
+  (see [Configuration](#configuration))
 - **Prometheus** (`localhost:9090`) - scrapes the sample service and
   evaluates the recording/alerting rules in [`prometheus/`](prometheus)
 - **Alertmanager** (`localhost:9093`) - receives alerts and routes them by
@@ -246,6 +248,29 @@ long window are required, how the latency and saturation SLOs reuse the
 identical math, and the precision/detection-speed tradeoff behind each
 tier is in [`docs/runbook.md`](docs/runbook.md).
 
+## Configuration
+
+`sample-service`'s traffic is controlled by environment variables (set in
+[`docker-compose.yml`](docker-compose.yml)); none require a restart to
+change via their `/error-rate`, `/slow-rate`, and `/queue-depth` routes
+except the two below, which are read once at startup:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `ERROR_RATE` | `0.001` | starting value for the `/error-rate` knob |
+| `SLOW_RATE` | `0.001` | starting value for the `/slow-rate` knob |
+| `QUEUE_DEPTH_TARGET` | `5` | starting value for the `/queue-depth` knob |
+| `TRAFFIC_RPS` | `20` | base synthetic request rate |
+| `SEASONAL_AMPLITUDE` | `0.5` | how far request volume swings above/below `TRAFFIC_RPS`, as a fraction (`0.5` = ±50%); `0` disables the wave |
+| `SEASONAL_PERIOD_SECONDS` | `900` | how long one full up-and-down cycle takes |
+
+The seasonality only scales how often synthetic requests are generated -
+it never touches the error/slow/queue-depth ratios, so it changes what the
+request/error-rate panels in Grafana look like without affecting alert
+correctness or timing (the error-rate SLO, for example, still depends only
+on the fraction of requests marked as errors, not on how many requests
+there were).
+
 ## Repository layout
 
 ```
@@ -264,7 +289,7 @@ grafana/
   provisioning/          auto-wired Prometheus datasource + dashboard provider
   dashboards/            the SLO burn-rate dashboard JSON (all 3 SLOs)
 sample-service/
-  app.py                 Flask app: /metrics, /error-rate, /slow-rate, /queue-depth, synthetic traffic
+  app.py                 Flask app: /metrics, /error-rate, /slow-rate, /queue-depth, seasonal synthetic traffic
 scripts/
   demo-incident.sh       scripted ramp/hold/recover incident for any of the
                           4 availability alert tiers

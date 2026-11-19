@@ -52,9 +52,17 @@ and the gauge-to-ratio adaptation the saturation SLO needs;
 (the receiver blocks ship commented out with `${VAR}` placeholders, not
 real credentials).
 
+Request *volume* (not the error/slow/queue-depth ratios) follows a sine
+wave on top of the configured base rate (`TRAFFIC_RPS`), controlled by
+`SEASONAL_AMPLITUDE`/`SEASONAL_PERIOD_SECONDS`, so the Grafana/README
+request-rate panels show a rising-and-falling pattern instead of a flat
+line even with no incident running - this has no effect on alert
+correctness, since the SLOs depend only on the error/slow/saturation
+ratios, never on request volume.
+
 ## Test results
 
-Full suite: **182 passed, 2 skipped** by default (the skips are
+Full suite: **186 passed, 2 skipped** by default (the skips are
 `tests/integration/test_stack.py`'s two tests, gated on
 `RUN_INTEGRATION=1` - run explicitly, both passed against a live stack,
 each fast-tier alert reaching `firing` and routing to `page` in
@@ -97,10 +105,9 @@ Verified with 70 consecutive promtool runs and zero failures.
 
 ## Known limitations
 
-- The sample service's synthetic traffic is flat (no daily/weekly
-  seasonality), so burn-rate graphs look like a flat line until an
-  incident is simulated - fine for demonstrating the alerting method, not
-  representative of real traffic shape.
+- The seasonal traffic wave is a simple sine function, not a realistic
+  weekday/weekend or business-hours pattern - it's deliberately simple so
+  the request-rate panels aren't flat, not a traffic model.
 - The latency histogram's observed durations are synthetic values chosen
   to land on either side of the 300ms bucket boundary; the service does
   not actually sleep for that duration per request (doing so would throttle
@@ -119,7 +126,7 @@ Verified with 70 consecutive promtool runs and zero failures.
 ## Future ideas
 
 See the "Resume point" section of [PROGRESS.md](PROGRESS.md) for a short
-list of possible follow-ups (more realistic synthetic traffic patterns;
-possibly gating the `integration-test` CI job to `push`/`workflow_dispatch`
-if its several-minutes runtime becomes annoying on every PR). None are
-required - the project as scoped is complete.
+list of possible follow-ups (possibly gating the `integration-test` CI job
+to `push`/`workflow_dispatch` if its several-minutes runtime becomes
+annoying on every PR). None are required - the project as scoped is
+complete.
