@@ -310,8 +310,12 @@ depth < 50 items) reusing the identical burn-rate method are complete and
 tested end-to-end against a real running stack. CI itself brings up the
 real `docker-compose` stack and asserts against the live Prometheus and
 Alertmanager APIs (`integration-test` job), not just config-validates the
-YAML. See [PROGRESS.md](PROGRESS.md) for the full phase-by-phase history
-and what's planned next.
+YAML. That job runs automatically on pushes to `main` and can be triggered
+on demand (GitHub Actions' "Run workflow" button, `workflow_dispatch`);
+every pull request still gets the fast config-validate/lint/unit-test jobs
+without waiting several minutes for a real burn-rate window to clear. See
+[PROGRESS.md](PROGRESS.md) for the full phase-by-phase history and what's
+planned next.
 
 ## License
 

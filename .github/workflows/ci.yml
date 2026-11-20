@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   validate-prometheus-config:
@@ -60,6 +61,12 @@ jobs:
     # inactive to firing and show up correctly routed in Alertmanager - see
     # tests/integration/test_stack.py. Only this job needs RUN_INTEGRATION=1;
     # it's skipped by default in test-sample-service above.
+    #
+    # This takes several minutes (it waits for a real burn-rate window to
+    # clear its threshold), so it only runs automatically on pushes to main
+    # - every PR still gets the fast config-validate/lint/unit-test jobs
+    # above. Trigger it on demand for a PR via "Run workflow" (workflow_dispatch).
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

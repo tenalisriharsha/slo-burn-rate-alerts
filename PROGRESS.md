@@ -266,19 +266,42 @@ the availability SLO; the latency SLO is driven the same way via
       (340.93s, 2 passed), confirming the traffic wave doesn't disrupt
       real alert timing.
 
+### Phase 7 - Gate the slow integration-test CI job off every PR (done)
+
+- [x] `.github/workflows/ci.yml`: added `workflow_dispatch:` to the
+      workflow-level triggers and an `if:` condition on the
+      `integration-test` job so it only runs automatically on pushes to
+      `main`, or on demand via GitHub Actions' "Run workflow" button -
+      exactly the two options the previous session's resume point left
+      open. Every pull request still runs the fast
+      `validate-prometheus-config` / `validate-alertmanager-config` /
+      `lint-sample-service` / `test-sample-service` jobs; only the
+      several-minutes Docker-compose job (which waits for a real
+      burn-rate window to clear its threshold) is skipped on PRs now.
+- [x] README's Status section updated to describe the new trigger
+      behavior.
+- [x] Verified the YAML directly: parsed `ci.yml` with the same
+      `yaml.safe_load` approach `tests/config/test_ci_integration_job.py`
+      uses and confirmed `workflow_dispatch` is a top-level trigger and
+      the `integration-test` job's `if:` is the expected
+      `github.event_name == 'workflow_dispatch' || (github.event_name ==
+      'push' && github.ref == 'refs/heads/main')`. GitHub's own trigger
+      evaluation isn't reproducible locally, but this confirms the YAML
+      that drives it is well-formed and says what it's meant to say.
+- [x] Ran the real thing: re-ran `RUN_INTEGRATION=1 pytest
+      tests/integration -m integration -v` against a live `docker compose`
+      stack directly - this exercises exactly the job's actual steps
+      (unaffected by the trigger change, which only decides *whether*
+      GitHub runs the job, not what it does) - both tests passed (340.62s),
+      each fast-tier alert reaching `firing` and routing to `page`.
+- [x] Full pytest suite (202 passed, 2 skipped), `make check`, and `make
+      lint` all pass after the YAML change.
+
 ## Resume point
 
-All six phases are complete. The full test suite passes (186 passed, 2
-skipped - the 2 skips are the Docker-gated integration tests, which were
-also run explicitly this session against the real stack and passed),
-`make check` and `make lint` pass.
-
-Ideas for a future session (not required, nothing left is broken):
-
-- The `integration-test` CI job takes several minutes (it waits for a real
-  burn-rate window to clear its threshold) - if that becomes annoying on
-  every PR, consider gating it to `push` on `main` only, or adding
-  `workflow_dispatch` so it can also be run on demand.
+All seven phases are complete. The full test suite passes, `make check`
+and `make lint` pass. Nothing is broken; no further work is required for
+the project as scoped.
 
 ## Known gap: published repo is stale
 
