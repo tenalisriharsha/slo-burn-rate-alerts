@@ -62,15 +62,15 @@ ratios, never on request volume.
 
 ## Test results
 
-Full suite: **186 passed, 2 skipped** by default (the skips are
+Full suite: **202 passed, 2 skipped** by default (the skips are
 `tests/integration/test_stack.py`'s two tests, gated on
-`RUN_INTEGRATION=1` - run explicitly, both passed against a live stack,
+`RUN_INTEGRATION=1` - run explicitly against a live stack, both passed,
 each fast-tier alert reaching `firing` and routing to `page` in
 Alertmanager in under 6 minutes). Coverage spans:
 
 - `tests/unit/` - sample-service Flask routes and state
 - `tests/config/` - structural checks on the Prometheus/Alertmanager/
-  Grafana config files
+  Grafana/CI config files
 - `tests/promtool/` - real `promtool`/`amtool` validation and alert-tier
   boundary unit tests, run via Docker
 - `tests/integration/` - brings up the real `docker-compose` stack and
@@ -79,8 +79,10 @@ Alertmanager in under 6 minutes). Coverage spans:
 CI (`.github/workflows/ci.yml`) runs config validation, linting, and the
 test suite on every push/PR, plus a dedicated `integration-test` job that
 runs the Docker-gated end-to-end test against the real stack rather than
-only validating its YAML. The config-validation jobs were fixed earlier -
-see below.
+only validating its YAML. That job now only runs automatically on pushes
+to `main` (or on demand via `workflow_dispatch`) so PRs aren't blocked on
+its several-minutes runtime - see below. The config-validation jobs were
+fixed earlier - see below.
 
 ## What was fixed
 
@@ -102,6 +104,14 @@ could occasionally read a one-cycle-stale value. Fixed by collapsing the
 three groups into one (same rule order, now guaranteed sequential) and
 pinning its evaluation interval to match the real scrape interval.
 Verified with 70 consecutive promtool runs and zero failures.
+
+Not a fix, but a follow-up from that session's resume point: the
+`integration-test` CI job's several-minutes runtime (it waits for a real
+burn-rate window to clear its threshold) ran on every single PR, including
+ones that never touched Prometheus/Alertmanager config. Added
+`workflow_dispatch` to the workflow and an `if:` condition on the job so
+it only runs automatically on pushes to `main`, with manual triggering
+available on demand - every PR still gets the fast jobs.
 
 ## Known limitations
 
@@ -125,8 +135,5 @@ Verified with 70 consecutive promtool runs and zero failures.
 
 ## Future ideas
 
-See the "Resume point" section of [PROGRESS.md](PROGRESS.md) for a short
-list of possible follow-ups (possibly gating the `integration-test` CI job
-to `push`/`workflow_dispatch` if its several-minutes runtime becomes
-annoying on every PR). None are required - the project as scoped is
-complete.
+See the "Resume point" section of [PROGRESS.md](PROGRESS.md). Nothing is
+required - the project as scoped is complete.
