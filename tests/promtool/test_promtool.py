@@ -117,7 +117,7 @@ def test_amtool_check_config_passes():
 # text ever drifts from what's hardcoded here.
 _PAGERDUTY_COMMENTED_BLOCK = """\
     # pagerduty_configs:
-    #   - routing_key: '${PAGERDUTY_ROUTING_KEY}'
+    #   - routing_key_file: /etc/alertmanager/secrets/pagerduty_routing_key
     #     severity: '{{ .CommonLabels.severity }}'
     #     description: '{{ .CommonAnnotations.summary }}'
     #     details:
@@ -127,7 +127,7 @@ _PAGERDUTY_COMMENTED_BLOCK = """\
 
 _SLACK_COMMENTED_BLOCK = """\
     # slack_configs:
-    #   - api_url: '${SLACK_WEBHOOK_URL}'
+    #   - api_url_file: /etc/alertmanager/secrets/slack_webhook_url
     #     channel: '#slo-tickets'
     #     title: '{{ .CommonLabels.alertname }}: {{ .CommonLabels.slo }}'
     #     text: >-
@@ -143,13 +143,16 @@ def _uncommented(block: str) -> str:
 def test_amtool_check_config_passes_with_integration_blocks_uncommented():
     """docs/integrations.md's "Notes" section promises: "`make check`
     (`amtool check-config`) validates the YAML and Go template syntax of
-    both blocks without needing real credentials - safe to run any time",
-    and separately: "Alertmanager expands `${VAR}` references in its
-    config file against its own process environment, so the secret itself
-    never has to be written into `alertmanager.yml`". This follows those
-    exact instructions - uncomment both receiver blocks, set the two env
-    vars the docs name to dummy (non-real) values, run `amtool
-    check-config` - and expects it to pass, as documented.
+    both blocks without needing the secret files to exist or contain real
+    credentials - safe to run any time, including ... with the referenced
+    files missing (`*_file` fields are only read when Alertmanager
+    actually starts, not during `check-config`)". This follows those exact
+    instructions - uncomment both receiver blocks (which point at
+    `routing_key_file`/`api_url_file` paths under the gitignored
+    `alertmanager/secrets/` directory, per docs/integrations.md - the
+    pinned Alertmanager image has no `${VAR}`-style env-var expansion for
+    secret fields) and runs `amtool check-config` without creating those
+    secret files - and expects it to pass, as documented.
     """
     original = (REPO_ROOT / "alertmanager" / "alertmanager.yml").read_text()
     assert _PAGERDUTY_COMMENTED_BLOCK in original, "pagerduty block text has changed"
@@ -169,10 +172,6 @@ def test_amtool_check_config_passes_with_integration_blocks_uncommented():
                 "docker",
                 "run",
                 "--rm",
-                "-e",
-                "PAGERDUTY_ROUTING_KEY=dummy-routing-key",
-                "-e",
-                "SLACK_WEBHOOK_URL=https://hooks.slack.example/dummy",
                 "-v",
                 f"{REPO_ROOT / 'alertmanager'}:/etc/alertmanager:ro",
                 "--entrypoint",
