@@ -62,11 +62,12 @@ ratios, never on request volume.
 
 ## Test results
 
-Full suite: **202 passed, 2 skipped** by default (the skips are
+Full suite: **215 passed, 2 skipped** by default (the skips are
 `tests/integration/test_stack.py`'s two tests, gated on
-`RUN_INTEGRATION=1` - run explicitly against a live stack, both passed,
-each fast-tier alert reaching `firing` and routing to `page` in
-Alertmanager in under 6 minutes). Coverage spans:
+`RUN_INTEGRATION=1` - run explicitly against a live stack in the final
+session, both passed, each fast-tier alert (availability and saturation)
+reaching `firing` and routing to `page` in Alertmanager in under 6
+minutes). Coverage spans:
 
 - `tests/unit/` - sample-service Flask routes and state
 - `tests/config/` - structural checks on the Prometheus/Alertmanager/
@@ -133,7 +134,25 @@ available on demand - every PR still gets the fast jobs.
   away entirely - a real cost of the gauge-to-ratio adaptation, unlike the
   counter-based availability and latency SLOs, which see every request.
 
+## Final session
+
+The last session re-verified everything end to end from scratch rather
+than building new scope: a clean virtualenv install, the full pytest
+suite, `ruff`, `make check`, and - critically - the live
+`docker compose` stack with `RUN_INTEGRATION=1 pytest tests/integration`,
+which brings up real Prometheus/Alertmanager/sample-service containers
+and confirms both the availability and saturation fast-tier alerts still
+reach `firing` and route to `page`. It also confirmed the published
+GitHub repository's `main` branch now matches this branch's tip exactly
+(a staleness gap noted in an earlier session has since been resolved by
+the nightly PR pipeline merging prior sessions' work), so the README's
+quick start works against a fresh clone as published, not just in the
+working tree.
+
 ## Future ideas
 
-See the "Resume point" section of [PROGRESS.md](PROGRESS.md). Nothing is
-required - the project as scoped is complete.
+Nothing is required - the project as scoped is complete. If extended
+further, natural next steps would be a fourth SLO shape (e.g. throughput
+or a dependency-based SLO), a Terraform/Helm packaging of the stack for
+a real cluster, or wiring a live PagerDuty/Slack sandbox into CI to
+exercise `docs/integrations.md`'s instructions automatically.
