@@ -297,35 +297,38 @@ the availability SLO; the latency SLO is driven the same way via
 - [x] Full pytest suite (202 passed, 2 skipped), `make check`, and `make
       lint` all pass after the YAML change.
 
+### Phase 8 - Final wrap-up (done)
+
+- [x] Re-verified the full test suite from a clean virtualenv (not reusing
+      any previously-installed environment): `pip install -r
+      sample-service/requirements.txt -r sample-service/requirements-dev.txt
+      pytest requests`, then `pytest -q` - **215 passed, 2 skipped** (the 2
+      skips are the Docker-gated integration tests, run separately below).
+      `ruff check sample-service/` and `make check`
+      (promtool config + rules, amtool check-config) all pass.
+- [x] Ran the real headline feature end to end again, not just unit tests:
+      `RUN_INTEGRATION=1 pytest tests/integration -m integration -v`
+      against a live `docker compose` stack - both the availability and
+      saturation fast-tier alerts reached `firing` and routed to `page` in
+      Alertmanager (2 passed in 330s), then tore the stack down cleanly.
+- [x] Resolved the previously-noted gap below: confirmed `origin/main` on
+      the published GitHub repo now points at the exact same commit as
+      this branch's tip (`git rev-list --count origin/main..HEAD` is `0`),
+      so the "published repo is stale" gap from the 2026-11-15 note no
+      longer applies - the pipeline has since merged the prior nightly
+      PRs into `main`. No push was needed or performed this session.
+- [x] Spot-checked the preview screenshots in `docs/screenshots/` by
+      opening them as images again - all 12 still render the real
+      Prometheus/Alertmanager/Grafana UIs with populated data, no
+      blank/broken panels.
+
 ## Resume point
 
-All seven phases are complete. The full test suite passes, `make check`
-and `make lint` pass. Nothing is broken; no further work is required for
-the project as scoped.
+All eight phases are complete. The full test suite passes (215 passed, 2
+skipped by default; both skipped integration tests pass when run live
+against a real Docker stack), `make check` and `make lint` pass, and the
+published GitHub repo's `main` branch matches this branch's tip. Nothing
+is broken; no further work is required for the project as scoped. This
+was the project's final allocated session.
 
-## Known gap: published repo is stale
-
-An independent clean-environment verification pass (2026-11-15) ran the
-README's quick start against the *published* GitHub repository
-(`github.com/tenalisriharsha/slo-burn-rate-alerts`, branch `main`) and
-failed: `main` there is several commits behind this branch's content - it
-has no `grafana/` directory, no `scripts/demo-incident.sh`, no `tests/`
-suite, and no latency SLO (`latency_recording_rules.yml` /
-`latency_alerting_rules.yml`), and its `docker-compose.yml` only defines 3
-services (no Grafana), so `make up` there never brings up `localhost:3000`
-as the README describes.
-
-This is not a code or README defect: every file the README references
-(the `grafana/` dir, `scripts/demo-incident.sh`, `tests/`, the latency
-rule files, the 4-service `docker-compose.yml`) already exists in this
-branch's working tree, confirmed again on 2026-11-15. The gap is purely
-that `main` on GitHub has not been fast-forwarded/merged to include this
-branch's commits. Fixing it requires a `git push`/merge to `main`, which
-is outside what an unattended coding session should do without the user's
-explicit sign-off (pushing/rewriting a shared branch's history is exactly
-the kind of action that needs confirmation first). Next session (or the
-user directly): fast-forward or merge `main` to the tip of this branch and
-push, then the README's quick start will work against a fresh clone as
-written.
-
-STATUS: COMPLETE (pending the push/merge above to make the published repo match)
+STATUS: COMPLETE
