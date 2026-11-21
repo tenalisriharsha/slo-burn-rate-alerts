@@ -1,0 +1,172 @@
+# promtool unit tests for prometheus/latency_alerting_rules.yml.
+#
+# Mirrors tests/promtool/rules_test.yml (availability) and
+# tests/promtool/saturation_rules_test.yml (saturation): each alert tier
+# gets a below-threshold burn rate (must never fire) and an
+# above-threshold burn rate (must be "firing" once both the threshold's
+# long window has enough history and the alert's `for` duration has
+# elapsed). Closes the gap noted while re-checking earlier phases' test
+# coverage - PROGRESS.md documents real promtool boundary tests for the
+# availability and saturation SLOs, but the latency SLO (added in Phase 3)
+# only had static YAML/regex assertions (tests/config/test_latency_alerting_rules.py),
+# never an actual simulated burn through the real promtool engine. That's
+# exactly the kind of gap the saturation flakiness fix (PROGRESS.md) showed
+# can hide a real timing/boundary bug.
+#
+# http_requests_total{code="200"} here stands in for *all* requests
+# (sample_service:requests:rateX sums every http_requests_total series
+# regardless of code label), and http_request_duration_seconds_bucket{le="0.3"}
+# is the cumulative "fast" (<=300ms) bucket latency_recording_rules.yml reads
+# directly - the same histogram-bucket-as-ratio shape described in
+# docs/runbook.md's latency section.
+#
+# Run via: docker run --rm -v "$PWD":/work -w /work --entrypoint promtool
+#   prom/prometheus:latest test rules tests/promtool/latency_rules_test.yml
+# (see tests/promtool/test_promtool.py, which runs exactly that).
+rule_files:
+  - ../../prometheus/recording_rules.yml
+  - ../../prometheus/latency_recording_rules.yml
+  - ../../prometheus/latency_alerting_rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # --- Tier 1: SampleServiceLatencyBudgetBurnFast (1h & 5m windows, >=14.4x, for: 2m) ---
+  - interval: 30s
+    input_series:
+      - series: 'http_requests_total{job="sample-service",method="GET",code="200"}'
+        values: '0+1000x135'
+      - series: 'http_request_duration_seconds_bucket{job="sample-service",le="0.3"}'
+        values: '0+900x135' # 90% fast -> 10% slow -> ratio 0.1 -> burnrate 10 (< 14.4)
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: SampleServiceLatencyBudgetBurnFast
+        exp_alerts: []
+
+  - interval: 30s
+    input_series:
+      - series: 'http_requests_total{job="sample-service",method="GET",code="200"}'
+        values: '0+1000x135'
+      - series: 'http_request_duration_seconds_bucket{job="sample-service",le="0.3"}'
+        values: '0+700x135' # 70% fast -> 30% slow -> ratio 0.3 -> burnrate 30 (> 14.4)
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: SampleServiceLatencyBudgetBurnFast
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              slo: sample-service-latency
+              window: fast
+            exp_annotations:
+              summary: "sample-service is burning its latency budget >14x too fast"
+              description: >-
+                The fraction of requests over the 300ms p99 target, over the
+                last 1h AND the last 5m, both exceed 14.4x the allowed SLO burn
+                rate for the 99% latency objective. At this rate the 30-day
+                latency budget is exhausted in ~2 days. See
+                docs/runbook.md#latency-slo.
+
+  # --- Tier 2: SampleServiceLatencyBudgetBurnMediumFast (6h & 30m windows, >=6x, for: 15m) ---
+  - interval: 5m
+    input_series:
+      - series: 'http_requests_total{job="sample-service",method="GET",code="200"}'
+        values: '0+1000x85'
+      - series: 'http_request_duration_seconds_bucket{job="sample-service",le="0.3"}'
+        values: '0+970x85' # ratio 0.03 -> burnrate 3 (< 6)
+    alert_rule_test:
+      - eval_time: 6h40m
+        alertname: SampleServiceLatencyBudgetBurnMediumFast
+        exp_alerts: []
+
+  - interval: 5m
+    input_series:
+      - series: 'http_requests_total{job="sample-service",method="GET",code="200"}'
+        values: '0+1000x85'
+      - series: 'http_request_duration_seconds_bucket{job="sample-service",le="0.3"}'
+        values: '0+850x85' # ratio 0.15 -> burnrate 15 (> 6)
+    alert_rule_test:
+      - eval_time: 6h40m
+        alertname: SampleServiceLatencyBudgetBurnMediumFast
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              slo: sample-service-latency
+              window: medium-fast
+            exp_annotations:
+              summary: "sample-service is burning its latency budget >6x too fast"
+              description: >-
+                The fraction of requests over the 300ms p99 target, over the
+                last 6h AND the last 30m, both exceed 6x the allowed SLO burn
+                rate for the 99% latency objective. At this rate the 30-day
+                latency budget is exhausted in ~5 days. See
+                docs/runbook.md#latency-slo.
+
+  # --- Tier 3: SampleServiceLatencyBudgetBurnSlow (1d & 2h windows, >=3x, for: 1h) ---
+  - interval: 30m
+    input_series:
+      - series: 'http_requests_total{job="sample-service",method="GET",code="200"}'
+        values: '0+1000x56'
+      - series: 'http_request_duration_seconds_bucket{job="sample-service",le="0.3"}'
+        values: '0+985x56' # ratio 0.015 -> burnrate 1.5 (< 3)
+    alert_rule_test:
+      - eval_time: 26h
+        alertname: SampleServiceLatencyBudgetBurnSlow
+        exp_alerts: []
+
+  - interval: 30m
+    input_series:
+      - series: 'http_requests_total{job="sample-service",method="GET",code="200"}'
+        values: '0+1000x56'
+      - series: 'http_request_duration_seconds_bucket{job="sample-service",le="0.3"}'
+        values: '0+910x56' # ratio 0.09 -> burnrate 9 (> 3)
+    alert_rule_test:
+      - eval_time: 26h
+        alertname: SampleServiceLatencyBudgetBurnSlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              slo: sample-service-latency
+              window: slow
+            exp_annotations:
+              summary: "sample-service is burning its latency budget 3x too fast"
+              description: >-
+                The fraction of requests over the 300ms p99 target, over the
+                last 1d AND the last 2h, both exceed 3x the allowed SLO burn
+                rate for the 99% latency objective. At this rate the 30-day
+                latency budget is exhausted in ~10 days. See
+                docs/runbook.md#latency-slo.
+
+  # --- Tier 4: SampleServiceLatencyBudgetBurnVerySlow (3d & 6h windows, >=1x, for: 3h) ---
+  - interval: 1h
+    input_series:
+      - series: 'http_requests_total{job="sample-service",method="GET",code="200"}'
+        values: '0+1000x82'
+      - series: 'http_request_duration_seconds_bucket{job="sample-service",le="0.3"}'
+        values: '0+997x82' # ratio 0.003 -> burnrate 0.3 (< 1)
+    alert_rule_test:
+      - eval_time: 3d6h
+        alertname: SampleServiceLatencyBudgetBurnVerySlow
+        exp_alerts: []
+
+  - interval: 1h
+    input_series:
+      - series: 'http_requests_total{job="sample-service",method="GET",code="200"}'
+        values: '0+1000x82'
+      - series: 'http_request_duration_seconds_bucket{job="sample-service",le="0.3"}'
+        values: '0+950x82' # ratio 0.05 -> burnrate 5 (> 1)
+    alert_rule_test:
+      - eval_time: 3d6h
+        alertname: SampleServiceLatencyBudgetBurnVerySlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              slo: sample-service-latency
+              window: very-slow
+            exp_annotations:
+              summary: "sample-service is on track to exhaust its 30-day latency budget"
+              description: >-
+                The fraction of requests over the 300ms p99 target, over the
+                last 3d AND the last 6h, both exceed the allowed SLO burn rate
+                for the 99% latency objective. At this rate the 30-day latency
+                budget will be fully exhausted by the end of the period. See
+                docs/runbook.md#latency-slo.
