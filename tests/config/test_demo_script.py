@@ -7,9 +7,18 @@ prometheus/alerting_rules.yml - if the rules drift (e.g. a `for:` duration
 is tuned), the demo would silently hold for the wrong amount of time and
 never reach `firing`, with no test catching it.
 """
+import json
+import os
 import re
+import shutil
+import signal
+import subprocess
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -93,3 +102,76 @@ def test_makefile_burn_and_reset_targets_hit_the_error_rate_endpoint():
     # reset must put the service back at the documented healthy baseline.
     reset_block = makefile.split("reset:", 1)[1].split("demo:", 1)[0]
     assert '"rate": 0.001' in reset_block
+
+
+class _CapturingErrorRateHandler(BaseHTTPRequestHandler):
+    """Stands in for sample-service's POST /error-rate - the demo script's
+    only real dependency outside its own process - so the script's actual
+    runtime behavior (not just its source text) can be exercised without
+    bringing up the whole Flask app/docker stack.
+    """
+
+    requests: list
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(length) or b"{}")
+        self.requests.append(body)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"error_rate": body.get("rate")}).encode())
+
+    def log_message(self, *args):  # noqa: D102 - silence default stderr logging
+        pass
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash is required to run the script")
+def test_script_actually_ramps_then_resets_to_baseline_on_sigint():
+    """Behavioral check of the trap/cleanup claim
+    test_script_resets_to_the_documented_healthy_baseline_on_exit only
+    verifies via text presence: runs the real script (fast tier, which
+    holds for HOLD_SECONDS=150s per the table above) against a stub
+    /error-rate endpoint, sends it SIGINT partway through the hold, and
+    asserts the trap actually fired - a real POST with the documented
+    0.001 baseline rate reaching the stub server - not just that the
+    script's source contains the word "trap".
+    """
+    received: list = []
+    handler = type("Handler", (_CapturingErrorRateHandler,), {"requests": received})
+    server = HTTPServer(("127.0.0.1", 0), handler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}"
+        proc = subprocess.Popen(
+            ["bash", str(DEMO_SCRIPT), "fast", "--url", url],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline and not received:
+                time.sleep(0.1)
+            assert received, "script never POSTed the incident rate to the stub server"
+            assert received[0]["rate"] == pytest.approx(0.5)
+
+            # Send SIGINT to the whole process group, not just bash's own
+            # pid: bash is blocked inside `sleep ${HOLD_SECONDS}` (150s for
+            # the fast tier), and signaling bash alone leaves that `sleep`
+            # child running as an orphan holding the stdout/stderr pipes
+            # open, which hangs communicate() for up to 150s.
+            os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+            stdout, stderr = proc.communicate(timeout=15)
+        finally:
+            if proc.poll() is None:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                proc.communicate(timeout=5)
+    finally:
+        server.shutdown()
+        server_thread.join(timeout=5)
+
+    assert len(received) >= 2, f"expected a reset POST after SIGINT; got {received}\n{stdout}{stderr}"
+    assert received[-1]["rate"] == pytest.approx(0.001)
