@@ -3,8 +3,10 @@ same way `make check` and tests/promtool/rules_test.yml document they
 should pass. Runs promtool/amtool inside their official Docker images, so
 no local install of either binary is required.
 """
+import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -109,6 +111,83 @@ def test_amtool_check_config_passes():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+# The exact commented-out blocks docs/integrations.md tells a user to
+# uncomment. Asserted present verbatim below before uncommenting, so this
+# test fails loudly (not silently no-ops) if alertmanager.yml's comment
+# text ever drifts from what's hardcoded here.
+_PAGERDUTY_COMMENTED_BLOCK = """\
+    # pagerduty_configs:
+    #   - routing_key: '${PAGERDUTY_ROUTING_KEY}'
+    #     severity: '{{ .CommonLabels.severity }}'
+    #     description: '{{ .CommonAnnotations.summary }}'
+    #     details:
+    #       slo: '{{ .CommonLabels.slo }}'
+    #       window: '{{ .CommonLabels.window }}'
+    #       runbook: 'https://github.com/tenalisriharsha/slo-burn-rate-alerts/blob/main/docs/runbook.md'"""
+
+_SLACK_COMMENTED_BLOCK = """\
+    # slack_configs:
+    #   - api_url: '${SLACK_WEBHOOK_URL}'
+    #     channel: '#slo-tickets'
+    #     title: '{{ .CommonLabels.alertname }}: {{ .CommonLabels.slo }}'
+    #     text: >-
+    #       {{ .CommonAnnotations.description }}
+    #       (window={{ .CommonLabels.window }}, severity={{ .CommonLabels.severity }})
+    #     send_resolved: true"""
+
+
+def _uncommented(block: str) -> str:
+    return "\n".join(re.sub(r"^(\s*)#\s?", r"\1", line) for line in block.split("\n"))
+
+
+def test_amtool_check_config_passes_with_integration_blocks_uncommented():
+    """docs/integrations.md's "Notes" section promises: "`make check`
+    (`amtool check-config`) validates the YAML and Go template syntax of
+    both blocks without needing real credentials - safe to run any time",
+    and separately: "Alertmanager expands `${VAR}` references in its
+    config file against its own process environment, so the secret itself
+    never has to be written into `alertmanager.yml`". This follows those
+    exact instructions - uncomment both receiver blocks, set the two env
+    vars the docs name to dummy (non-real) values, run `amtool
+    check-config` - and expects it to pass, as documented.
+    """
+    original = (REPO_ROOT / "alertmanager" / "alertmanager.yml").read_text()
+    assert _PAGERDUTY_COMMENTED_BLOCK in original, "pagerduty block text has changed"
+    assert _SLACK_COMMENTED_BLOCK in original, "slack block text has changed"
+    uncommented = original.replace(
+        _PAGERDUTY_COMMENTED_BLOCK, _uncommented(_PAGERDUTY_COMMENTED_BLOCK)
+    ).replace(_SLACK_COMMENTED_BLOCK, _uncommented(_SLACK_COMMENTED_BLOCK))
+
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".yml", dir=REPO_ROOT / "alertmanager", delete=True
+    ) as tmp:
+        tmp.write(uncommented)
+        tmp.flush()
+        tmp_name = Path(tmp.name).name
+        result = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-e",
+                "PAGERDUTY_ROUTING_KEY=dummy-routing-key",
+                "-e",
+                "SLACK_WEBHOOK_URL=https://hooks.slack.example/dummy",
+                "-v",
+                f"{REPO_ROOT / 'alertmanager'}:/etc/alertmanager:ro",
+                "--entrypoint",
+                "amtool",
+                ALERTMANAGER_IMAGE,
+                "check-config",
+                f"/etc/alertmanager/{tmp_name}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_promtool_rule_unit_tests_pass():
     """The alert-tier boundary tests PROGRESS.md claims already exist.
 
@@ -120,6 +199,18 @@ def test_promtool_rule_unit_tests_pass():
     tier's boundary behavior fails here instead of only in production.
     """
     result = _run_promtool("test", "rules", "tests/promtool/rules_test.yml")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_promtool_latency_rule_unit_tests_pass():
+    """The latency SLO (Phase 3, PROGRESS.md) only had static YAML/regex
+    threshold checks (tests/config/test_latency_alerting_rules.py) - unlike
+    the availability and saturation SLOs, it had no promtool unit-test file
+    actually simulating a burn through the real engine. This closes that
+    gap with tests/promtool/latency_rules_test.yml, mirroring the pattern
+    already used for the other two SLOs.
+    """
+    result = _run_promtool("test", "rules", "tests/promtool/latency_rules_test.yml")
     assert result.returncode == 0, result.stdout + result.stderr
 
 
