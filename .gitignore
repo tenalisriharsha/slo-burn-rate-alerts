@@ -5,3 +5,5 @@ venv/
 *.egg-info/
 .pytest_cache/
 .DS_Store
+alertmanager/secrets/*
+!alertmanager/secrets/.gitkeep

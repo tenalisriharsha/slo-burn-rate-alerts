@@ -1,11 +1,13 @@
 # Verification
 
 This document records a first-time-user style verification of this project,
-run in a fresh clone outside the working tree.
+run in a fresh clone outside the working tree (Docker Desktop, macOS,
+Docker Compose v5, Python 3.15).
 
 ## First-use check
 
-Followed the README's quick start section word for word:
+Followed the README's quick start section word for word, against the
+actual published repository:
 
 ```bash
 git clone https://github.com/tenalisriharsha/slo-burn-rate-alerts.git
@@ -13,57 +15,36 @@ cd slo-burn-rate-alerts
 make up
 ```
 
-Expected (per README): the clone gets the project as currently documented,
-`make up` builds and starts four containers (sample-service, Prometheus,
-Alertmanager, and Grafana with a provisioned dashboard and anonymous viewer
-access at `localhost:3000`).
+Expected (per README): `make up` builds and starts four containers
+(sample-service, Prometheus, Alertmanager, Grafana), with Grafana reachable
+anonymously at `localhost:3000`.
 
-Observed: `git clone https://github.com/tenalisriharsha/slo-burn-rate-alerts.git`
-checks out the `main` branch, which contains only 5 commits (scaffold,
-sample service, availability alerting rules, Alertmanager routing, and an
-early README/runbook). It does **not** contain the `grafana/` directory,
-`scripts/demo-incident.sh`, the `tests/` suite, or the latency SLO
-(`latency_recording_rules.yml`, `latency_alerting_rules.yml`). Its
-`docker-compose.yml` defines only three services (sample-service,
-Prometheus, Alertmanager) — there is no Grafana service at all, so
-`localhost:3000` never comes up. A first-time user pasting the quick-start
-`git clone` command verbatim gets a stack that cannot satisfy the rest of
-the quick-start instructions describing four containers and a Grafana
-dashboard.
+Observed: the clone checked out `main` at commit `500f94a`. `make up` built
+the sample-service image and started all four containers
+(`sample-service`, `prometheus`, `alertmanager`, `grafana`) without errors.
+After a few seconds:
 
-To exercise the project's current, intended behavior, verification
-continued against a fresh clone of the local repository at its current
-branch (equivalent in content to this working directory) in a new temporary
-directory, with `make up` run there instead:
-
-- `make up` built the sample-service image and started all four containers
-  (sample-service, prometheus, alertmanager, grafana), as the current
-  README describes.
 - `curl localhost:8000/metrics` → `200`
-- `curl localhost:9090/-/healthy` → `200`
+- `curl localhost:9090/-/ready` → `200`, `Prometheus Server is Ready.`
 - `curl localhost:9093/-/healthy` → `200`
 - `curl localhost:3000/api/health` → `200`, `{"database":"ok", ...}`
-- `curl localhost:3000/api/search` (no auth) → returned the provisioned
-  `SLO Burn Rate - sample-service` dashboard, confirming anonymous viewer
-  access works as documented.
-- `make check` → promtool validated `recording_rules.yml` (28 rules),
-  `alerting_rules.yml` (4 rules), `latency_recording_rules.yml` (21 rules),
-  `latency_alerting_rules.yml` (4 rules); amtool validated
-  `alertmanager.yml` (3 inhibit rules, 3 receivers). All succeeded.
-- `make lint` (after `pip install -r sample-service/requirements-dev.txt`)
-  → `ruff check sample-service/` → `All checks passed!`
 
-Result: FAIL - the README's quick-start `git clone` command points at a
-published repository whose default branch is several commits behind this
-project's current state, so the stack it actually produces (3 containers,
-no Grafana, no latency SLO) contradicts the rest of the quick start text a
-first-time user just read. The remainder of this check, run against the
-project's current content directly, passed with no deviation.
+`make down` cleanly stopped and removed all four containers and the
+network. This matches the README exactly, with no undocumented steps
+needed. (Note: an earlier verification pass of this project, made before
+recent commits landed on `main`, had found the published branch several
+commits behind - missing Grafana, the latency/saturation SLOs, and the
+test suite. That gap has since closed: the published `main` branch's
+`README.md`, `docker-compose.yml`, `prometheus/`, `sample-service/`,
+`grafana/`, and `scripts/` are now byte-identical to this repository's
+working tree.)
+
+Result: PASS
 
 ## Headline feature run
 
-With the four-container stack (built from the current project content, per
-the note above) running, simulated the documented availability incident:
+Brought the four-container stack up again and ran the documented
+availability incident:
 
 ```bash
 make burn RATE=0.5
@@ -72,54 +53,69 @@ make burn RATE=0.5
 Expected (per README): burn-rate alerts move `inactive` → `pending` →
 `firing` as the error rate stays elevated.
 
-Observed, polling `localhost:9090/api/v1/rules`:
-- shortly after the burn: `sample_service:burnrate5m` ≈ 333x (threshold is
-  14.4x), all four availability tiers (`SampleServiceErrorBudgetBurnFast`,
-  `MediumFast`, `Slow`, `VerySlow`) at `pending`
-- after `for: 2m` elapsed: `SampleServiceErrorBudgetBurnFast` = `firing`
+Observed, polling `localhost:9090/api/v1/rules` for
+`SampleServiceErrorBudgetBurnFast`:
+
+- baseline (before the burn): `inactive`
+- ~30s after the burn: `pending`
+- ~2m40s after the burn (matching the rule's `for: 2m` plus propagation
+  delay): `firing`
 - `curl localhost:9093/api/v2/alerts` showed the alert received by
-  Alertmanager with `severity: critical` and state `active`, matching the
-  "page" tier in the README's table
+  Alertmanager with `severity: critical` and `status.state: active`,
+  matching the "page" tier in the README's table
 
 ```bash
 make reset
 ```
 cleared the error rate back to `0.001`.
 
-Then simulated the independent latency incident:
+Exercised the other two independent SLO knobs documented in the README:
 
 ```bash
 curl -X POST localhost:8000/slow-rate -H 'Content-Type: application/json' -d '{"rate": 0.9}'
+curl -X POST localhost:8000/slow-rate -H 'Content-Type: application/json' -d '{"rate": 0.001}'
+curl -X POST localhost:8000/queue-depth -H 'Content-Type: application/json' -d '{"target": 80}'
+curl -X POST localhost:8000/queue-depth -H 'Content-Type: application/json' -d '{"target": 5}'
 ```
+Observed: each call returned the expected JSON echo (`{"slow_rate":0.9}`,
+`{"queue_depth_target":80.0}`, etc.) with no errors.
 
-Observed: `SampleServiceLatencyBudgetBurnFast` went to `pending` with
-`sample_service:latency_burnrate5m` ≈ 15.4x (past the 14.4x threshold),
-confirming the latency SLO behaves the same way as the availability one, as
-the README claims. Reset `slow-rate` back to `0.001`.
-
-Finally ran the scripted demo:
+Ran the scripted demo:
 
 ```bash
 make demo
 ```
-
 Expected: ramps error rate to 50%, holds 150s, auto-recovers.
 
-Observed: script output showed `[1/3] ramping error rate to 0.5`,
-`[2/3] holding at 0.5 for 150s`, `[3/3] incident window complete`, then
-`-> error rate reset to the healthy baseline (0.001)`, exit code 0.
+Observed: output showed `[1/3] ramping error rate to 0.5`, `[2/3] holding
+at 0.5 for 150s`, `[3/3] incident window complete`, then `-> error rate
+reset to the healthy baseline (0.001)`, exit code 0. The fast-tier alert
+had reached `pending` by the end of the hold window.
+
+Validated configs and lint, also documented in the quick start:
+
+```bash
+make check    # promtool + amtool validation of all rule/config files - all succeeded
+make lint     # ruff check sample-service/ -> All checks passed!
+```
+
+This project has no LLM-calling component, so no `claude -p` calls were
+applicable here; the headline feature is the burn-rate alerting pipeline
+itself, exercised above against the real, unmocked stack.
+
+`make down` cleanly tore down the stack afterward.
 
 Result: PASS
 
 ## Test suite with development tools
 
-In the same fresh clone, created a Python 3.12 virtual environment (matching
-the version CI's `lint-sample-service` and `test-sample-service` jobs use)
-and installed the project's dependencies plus `pytest`:
+In a fresh clone, created a Python virtual environment and installed the
+project's declared dependencies plus `pytest`/`requests` (used by the
+integration suite):
 
 ```bash
-python3.12 -m venv .venv
-.venv/bin/pip install -r sample-service/requirements.txt -r sample-service/requirements-dev.txt pytest
+python3 -m venv .venv
+.venv/bin/pip install -r sample-service/requirements.txt -r sample-service/requirements-dev.txt pytest requests
 ```
 
 Ran the lint check documented in the README:
@@ -127,33 +123,40 @@ Ran the lint check documented in the README:
 ```bash
 make lint
 ```
-Observed: `ruff check sample-service/` → `All checks passed!`
+Observed: `ruff check sample-service/` → `All checks passed!` (the project
+documents and uses `ruff`; it does not use `mypy` or any other type
+checker).
 
-Ran the full test suite:
-
-```bash
-pytest -q
-```
-Observed: `113 passed, 1 skipped in 11.19s`. The one skip was
-`tests/integration/test_stack.py`, gated behind `RUN_INTEGRATION=1` since it
-spins up its own docker-compose stack. Ran it explicitly:
+Ran the full non-integration test suite:
 
 ```bash
-RUN_INTEGRATION=1 pytest tests/integration -v
+pytest -q --ignore=tests/integration
 ```
-Observed: `1 passed in 180.61s` — the test builds its own stack, drives the
-same simulated incident, waits for the fast-burn tier to actually fire, and
-confirms Alertmanager routes it to the `page` receiver, then tears its stack
-down.
+Observed: `218 passed in 150.69s`, covering config validation
+(`tests/config/`), promtool-based rule unit tests (`tests/promtool/`), and
+sample-service unit tests (`tests/unit/`).
 
-Also re-ran the config validation documented in the README:
+Ran the real docker-compose integration suite explicitly (Docker is
+available), which brings up its own stack under a separate compose project
+name, drives a real incident, and tears itself down:
+
+```bash
+RUN_INTEGRATION=1 pytest tests/integration -m integration -v
+```
+Observed:
+```
+tests/integration/test_stack.py::test_simulated_incident_fires_the_fast_tier_alert_and_routes_to_page PASSED
+tests/integration/test_stack.py::test_simulated_saturation_incident_fires_the_fast_tier_alert_and_routes_to_page PASSED
+2 passed in 330.68s (0:05:30)
+```
+Confirmed via `docker ps -a` afterward that the test's own containers were
+removed and no stack was left running.
+
+Re-ran config validation one more time for completeness:
 
 ```bash
 make check
 ```
-Observed: all promtool and amtool checks passed, and the docker-image-based
-`tests/promtool/test_promtool.py` suite (4 tests covering config, rules, the
-Alertmanager config, and the promtool unit tests in
-`tests/promtool/rules_test.yml`) also passed.
+Observed: all promtool and amtool checks passed.
 
 Result: PASS
