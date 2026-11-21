@@ -322,13 +322,43 @@ the availability SLO; the latency SLO is driven the same way via
       Prometheus/Alertmanager/Grafana UIs with populated data, no
       blank/broken panels.
 
+### Phase 9 - Fix PagerDuty/Slack integration: `${VAR}` expansion doesn't exist (done)
+
+- [x] Independent testing found that the `${VAR}`-style env-var expansion
+      phase 2 built the PagerDuty/Slack receiver blocks around does not
+      exist in the pinned `prom/alertmanager:latest` image (0.34.1):
+      `api_url: '${SLACK_WEBHOOK_URL}'` is validated as a literal URL
+      before any expansion could happen, so both `amtool check-config`
+      and the real `alertmanager` binary fail/crash on it with
+      `unsupported scheme "" for URL`, even with the env var set.
+      `alertmanager --help-long` confirms there is no env-expansion flag
+      in this version.
+- [x] Fixed by switching both receiver blocks in
+      `alertmanager/alertmanager.yml` to Alertmanager's real
+      file-based secret fields - `routing_key_file` /
+      `api_url_file` - pointing at files under a new, gitignored
+      `alertmanager/secrets/` directory (tracked only via a `.gitkeep`
+      placeholder). No `docker-compose.yml` change was needed: the
+      existing `./alertmanager:/etc/alertmanager:ro` mount already
+      covers the `secrets/` subdirectory.
+- [x] Verified the fix two ways: `amtool check-config` against the
+      uncommented blocks with dummy secret files in place succeeds, and a
+      real `alertmanager` process started against the same uncommented
+      config stays up (checked container status + logs after a few
+      seconds) instead of crash-looping like the old `${VAR}` config did.
+- [x] Rewrote `docs/integrations.md` to document the file-based mechanism
+      (write the credential to `alertmanager/secrets/<name>`, no trailing
+      newline, via `printf '%s'`) and removed the false claim that
+      Alertmanager expands `${VAR}` references.
+
 ## Resume point
 
-All eight phases are complete. The full test suite passes (215 passed, 2
-skipped by default; both skipped integration tests pass when run live
-against a real Docker stack), `make check` and `make lint` pass, and the
-published GitHub repo's `main` branch matches this branch's tip. Nothing
-is broken; no further work is required for the project as scoped. This
-was the project's final allocated session.
+All nine phases are complete. `make check` and `make lint` pass, and the
+PagerDuty/Slack integration blocks now use a mechanism that actually
+works against the pinned Alertmanager version (file-based secrets, not
+the non-existent `${VAR}` env-var expansion phase 2 assumed). See disputes
+for one test (`tests/promtool/test_promtool.py::test_amtool_check_config_passes_with_integration_blocks_uncommented`)
+that hardcodes the old, non-working `${VAR}` block text verbatim and so
+cannot pass without being updated to match the new `_file`-based blocks.
 
 STATUS: COMPLETE
