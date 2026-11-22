@@ -50,22 +50,37 @@ def test_page_and_ticket_receivers_have_no_active_integration_by_default():
             assert "slack_configs" not in receiver
 
 
-def test_commented_pagerduty_and_slack_blocks_use_env_var_placeholders_only():
-    """docs/integrations.md tells users to set an env var and uncomment the
-    block, never to paste a credential in directly. YAML-structural checks
-    (and `amtool check-config`) can't see commented-out lines at all, so a
-    key/URL literal pasted in place of ${VAR} - leaving the line commented,
-    or even after uncommenting - would pass every other check here.
+def test_commented_pagerduty_and_slack_blocks_use_file_based_secrets_only():
+    """docs/integrations.md tells users to write a credential to a file
+    under the gitignored `alertmanager/secrets/` directory and uncomment
+    the block, never to paste a credential directly into the YAML. The
+    pinned Alertmanager image has no `${VAR}`-style env-var expansion for
+    secret fields (phase 9), so `routing_key`/`api_url` must never appear
+    as bare keys - only their `_file` counterparts, pointed at that
+    directory. YAML-structural checks (and `amtool check-config`) can't
+    see commented-out lines at all, so a credential literal pasted in
+    place of a `_file` path - leaving the line commented, or even after
+    uncommenting - would pass every other check here.
     """
     text = CONFIG_FILE.read_text()
+    found = {"routing_key_file": False, "api_url_file": False}
     for line in text.splitlines():
-        stripped = line.strip().lstrip("#").strip()
-        match = re.match(r"(routing_key|api_url):\s*'([^']*)'", stripped)
+        stripped = line.strip().lstrip("#").strip().lstrip("-").strip()
+        bare = re.match(r"(routing_key|api_url):", stripped)
+        assert bare is None, (
+            f"found a bare routing_key/api_url key - this pinned Alertmanager "
+            f"version has no ${{VAR}} expansion for it; use routing_key_file/"
+            f"api_url_file instead: {line!r}"
+        )
+        match = re.match(r"(routing_key_file|api_url_file):\s*(\S+)", stripped)
         if match:
-            value = match.group(2)
-            assert value.startswith("${") and value.endswith("}"), (
-                f"expected an env-var placeholder, found a literal value: {line!r}"
+            field, value = match.group(1), match.group(2)
+            found[field] = True
+            assert value.startswith("/etc/alertmanager/secrets/"), (
+                f"expected a path under the mounted secrets/ directory, "
+                f"found: {line!r}"
             )
+    assert all(found.values()), f"expected both fields present: {found}"
 
 
 def test_inhibit_rules_form_a_chain_from_fast_down_to_very_slow():
