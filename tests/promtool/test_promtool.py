@@ -3,6 +3,7 @@ same way `make check` and tests/promtool/rules_test.yml document they
 should pass. Runs promtool/amtool inside their official Docker images, so
 no local install of either binary is required.
 """
+import os
 import re
 import shutil
 import subprocess
@@ -166,6 +167,12 @@ def test_amtool_check_config_passes_with_integration_blocks_uncommented():
     ) as tmp:
         tmp.write(uncommented)
         tmp.flush()
+        # tempfile always creates 0600 files regardless of umask; the
+        # amtool image runs as uid 65534 (nobody), so without widening
+        # permissions the bind-mounted file is unreadable on real Linux
+        # Docker hosts (passes by accident on Docker Desktop for Mac,
+        # whose bind-mount layer doesn't enforce host uid permissions).
+        os.chmod(tmp.name, 0o644)
         tmp_name = Path(tmp.name).name
         result = subprocess.run(
             [
