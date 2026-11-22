@@ -49,8 +49,9 @@ ramp/hold/recover incident; `docs/runbook.md` explains the burn-rate math,
 the multi-window rationale, the false-positive/false-negative tradeoffs,
 and the gauge-to-ratio adaptation the saturation SLO needs;
 `docs/integrations.md` documents wiring up real PagerDuty/Slack delivery
-(the receiver blocks ship commented out with `${VAR}` placeholders, not
-real credentials).
+(the receiver blocks ship commented out, pointing at `routing_key_file`/
+`api_url_file` paths under a gitignored `alertmanager/secrets/` directory,
+not real credentials).
 
 Request *volume* (not the error/slow/queue-depth ratios) follows a sine
 wave on top of the configured base rate (`TRAFFIC_RPS`), controlled by
@@ -114,6 +115,15 @@ ones that never touched Prometheus/Alertmanager config. Added
 it only runs automatically on pushes to `main`, with manual triggering
 available on demand - every PR still gets the fast jobs.
 
+A later session found that the PagerDuty/Slack receiver blocks'
+`${PAGERDUTY_ROUTING_KEY}`/`${SLACK_WEBHOOK_URL}`-style placeholders don't
+actually work: the pinned `prom/alertmanager` image has no env-var
+expansion for secret fields, so `amtool check-config` and the real binary
+both reject that syntax outright. Fixed by switching both blocks to
+Alertmanager's real file-based secret fields (`routing_key_file`/
+`api_url_file`), pointing at a gitignored `alertmanager/secrets/`
+directory, and rewrote `docs/integrations.md` to match.
+
 ## Known limitations
 
 - The seasonal traffic wave is a simple sine function, not a realistic
@@ -136,9 +146,9 @@ available on demand - every PR still gets the fast jobs.
 
 ## Final session
 
-The last session re-verified everything end to end from scratch rather
-than building new scope: a clean virtualenv install, the full pytest
-suite, `ruff`, `make check`, and - critically - the live
+The second-to-last session re-verified everything end to end from scratch
+rather than building new scope: a clean virtualenv install, the full
+pytest suite, `ruff`, `make check`, and - critically - the live
 `docker compose` stack with `RUN_INTEGRATION=1 pytest tests/integration`,
 which brings up real Prometheus/Alertmanager/sample-service containers
 and confirms both the availability and saturation fast-tier alerts still
@@ -148,6 +158,26 @@ GitHub repository's `main` branch now matches this branch's tip exactly
 the nightly PR pipeline merging prior sessions' work), so the README's
 quick start works against a fresh clone as published, not just in the
 working tree.
+
+The final session investigated a CI-only failure on the open pull
+request: `tests/promtool/test_promtool.py::test_amtool_check_config_passes_with_integration_blocks_uncommented`
+failed on GitHub's `ubuntu-latest` runner with "permission denied"
+reading its temporary `alertmanager.yml` fixture inside the `amtool`
+container, but passed locally. Root-caused (not guessed) by inspecting
+the pinned `prom/alertmanager:latest` image directly
+(`docker run --entrypoint sh ... id` -> `uid=65534(nobody)`) and
+reproducing the exact failure by hand: Python's `tempfile` module always
+creates files `0600` (owner-only), so a file written by the CI runner's
+user is unreadable by the image's non-root `nobody` user once bind-mounted
+read-only; this doesn't reproduce on Docker Desktop for Mac because its
+bind-mount layer doesn't enforce the same uid-based permission bits. The
+fix lives entirely inside that test function (either `chmod` the fixture
+file after writing it, or pass `--user` to the `docker run` call), which
+is outside this project's test-ownership boundary for this session -
+logged to the disputes file instead of edited directly. Every other CI
+job on the PR (`validate-prometheus-config`, `validate-alertmanager-config`,
+`lint-sample-service`) passes, and the rest of `test-sample-service`'s 217
+other tests pass alongside it.
 
 ## Future ideas
 
