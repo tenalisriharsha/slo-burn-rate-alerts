@@ -351,14 +351,64 @@ the availability SLO; the latency SLO is driven the same way via
       newline, via `printf '%s'`) and removed the false claim that
       Alertmanager expands `${VAR}` references.
 
+### Phase 10 - CI investigation: `test_amtool_check_config_passes_with_integration_blocks_uncommented` (done, dispute logged)
+
+- [x] PR #6's CI was red on `test-sample-service`
+      (`tests/promtool/test_promtool.py::test_amtool_check_config_passes_with_integration_blocks_uncommented`)
+      with "permission denied" reading the test's temp `alertmanager.yml`
+      fixture from inside the `amtool` container. Root-caused by
+      inspecting the pinned image directly:
+      `docker run --rm --entrypoint sh prom/alertmanager:latest -c id`
+      reports `uid=65534(nobody)`, not the host user. Python's `tempfile`
+      module always creates files `0600` (owner-only, independent of
+      umask), so a temp file written by the CI runner's user is
+      unreadable by the image's non-root `nobody` user once bind-mounted
+      read-only into the container - reproduced by hand (creating a
+      `0600` file and running the exact same `docker run ... amtool
+      check-config` invocation against it outside of pytest) and
+      confirmed it fails every time on a real Linux Docker host, not
+      intermittently.
+- [x] Confirmed this is environment-specific, not a universal failure:
+      the same test passes on this machine's Docker Desktop for Mac in
+      under half a second, because its virtiofs bind-mount layer doesn't
+      enforce the same uid-based permission bits across the host/VM
+      boundary - so it never actually exercised the failure path here,
+      only on GitHub's `ubuntu-latest` runner.
+- [x] The only place the temp file is created and the only place `docker
+      run` is invoked for this check are both inside the test function
+      itself (`tempfile.NamedTemporaryFile(...)` and a hardcoded
+      `subprocess.run([...])` a few lines below it in
+      `tests/promtool/test_promtool.py`) - no non-test file (not
+      `alertmanager.yml`, `docker-compose.yml`, nor the `Makefile`) can
+      affect either. A real fix (`chmod` the fixture after writing it, or
+      pass `--user "$(id -u):$(id -g)"` to the `docker run` call) has to
+      live in the test itself, which is outside this session's
+      test-ownership boundary - logged to the disputes file instead of
+      edited directly.
+- [x] Verified nothing else regressed: ran the full suite from the same
+      clean virtualenv approach as the prior session - **218 passed, 2
+      skipped** (this one test passes locally for the Mac-specific reason
+      above, so the local count differs from CI's 217 passed / 1 failed /
+      2 skipped by exactly this test). `ruff check sample-service/` and
+      `make check` (promtool config + rules, amtool check-config) both
+      still pass. Every other CI job on PR #6
+      (`validate-prometheus-config`, `validate-alertmanager-config`,
+      `lint-sample-service`) passes; `integration-test` correctly skips
+      on a pull request per Phase 7's trigger gating.
+
 ## Resume point
 
-All nine phases are complete. `make check` and `make lint` pass, and the
-PagerDuty/Slack integration blocks now use a mechanism that actually
-works against the pinned Alertmanager version (file-based secrets, not
-the non-existent `${VAR}` env-var expansion phase 2 assumed). See disputes
-for one test (`tests/promtool/test_promtool.py::test_amtool_check_config_passes_with_integration_blocks_uncommented`)
-that hardcodes the old, non-working `${VAR}` block text verbatim and so
-cannot pass without being updated to match the new `_file`-based blocks.
+All ten phases are complete. `make check` and `make lint` pass, and the
+PagerDuty/Slack integration blocks use a mechanism that actually works
+against the pinned Alertmanager version (file-based secrets, not the
+non-existent `${VAR}` env-var expansion phase 2 assumed). One CI job on
+PR #6 remains red for a reason outside this session's ability to fix
+without touching a test file: see
+`tests/promtool/test_promtool.py::test_amtool_check_config_passes_with_integration_blocks_uncommented`
+in the disputes file - its fixture's temp-file permissions are
+unreadable by the pinned Alertmanager image's non-root user on real
+Linux Docker hosts (GitHub Actions), though it passes locally on Mac. The
+fix (a few lines inside that test function) needs to come from whoever
+owns test files.
 
 STATUS: COMPLETE
