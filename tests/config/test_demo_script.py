@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEMO_SCRIPT = REPO_ROOT / "scripts" / "demo-incident.sh"
 MAKEFILE = REPO_ROOT / "Makefile"
 ALERTING_RULES = REPO_ROOT / "prometheus" / "alerting_rules.yml"
+RECORDING_RULES = REPO_ROOT / "prometheus" / "recording_rules.yml"
 
 TIER_ALERTNAME = {
     "fast": "SampleServiceErrorBudgetBurnFast",
@@ -32,6 +33,13 @@ TIER_ALERTNAME = {
     "slow": "SampleServiceErrorBudgetBurnSlow",
     "very-slow": "SampleServiceErrorBudgetBurnVerySlow",
 }
+
+# Fastest-to-slowest: alertmanager/alertmanager.yml inhibits every slower
+# `window` label while a faster one is firing (window=fast inhibits
+# window=~"medium-fast|slow|very-slow", etc.), so a demo tier's error rate
+# must clear its own alert's threshold without also clearing any faster
+# tier's threshold.
+TIER_ORDER = ["fast", "medium-fast", "slow", "very-slow"]
 
 TIER_BLOCK = re.compile(
     r'(?P<tier>fast|medium-fast|slow|very-slow)\)\s*'
@@ -51,6 +59,35 @@ def _alert_by_name() -> dict:
     rules = yaml.safe_load(ALERTING_RULES.read_text())
     alerts = rules["groups"][0]["rules"]
     return {rule["alert"]: rule for rule in alerts}
+
+
+def _error_budget() -> float:
+    # sample_service:burnrateX records are "error_ratio / <error budget>"
+    # (e.g. "sample_service:error_ratio:rate5m / 0.001"); every burnrate
+    # record divides by the same constant, so the first match is enough.
+    text = RECORDING_RULES.read_text()
+    match = re.search(r"sample_service:error_ratio:rate\w+\s*/\s*([\d.]+)", text)
+    assert match, "could not find the error-budget divisor in recording_rules.yml"
+    return float(match.group(1))
+
+
+def _tier_threshold_ratios() -> dict:
+    """The minimum error ratio (0-1) each tier's own alert needs to fire,
+    derived from its `expr`'s burn-rate multiplier (e.g. ">= 14.4") times
+    the SLO error budget, i.e. the exact threshold prometheus evaluates -
+    not a value copied from the issue report.
+    """
+    alerts = _alert_by_name()
+    budget = _error_budget()
+    ratios = {}
+    for tier, alertname in TIER_ALERTNAME.items():
+        expr = alerts[alertname]["expr"]
+        multipliers = {float(n) for n in re.findall(r">=\s*([\d.]+)", expr)}
+        assert len(multipliers) == 1, (
+            f"{alertname}'s expr has inconsistent burn-rate thresholds: {multipliers}"
+        )
+        ratios[tier] = multipliers.pop() * budget
+    return ratios
 
 
 def test_script_defines_all_four_documented_tiers():
@@ -80,6 +117,36 @@ def test_script_hold_duration_is_at_least_the_alert_for_duration():
         for_duration = str(alerts[alertname]["for"])
         for_seconds = int(for_duration[:-1]) * unit_seconds[for_duration[-1]]
         assert int(tiers[tier]["hold"]) >= for_seconds
+
+
+def test_script_incident_rate_crosses_only_its_own_tiers_threshold():
+    """Each tier's INCIDENT_RATE must clear its own alert's burn-rate
+    threshold without also clearing any faster tier's threshold (fast is
+    always evaluated first). alertmanager/alertmanager.yml inhibits every
+    slower `window` while a faster one is firing - e.g. window=fast
+    inhibits window=~"medium-fast|slow|very-slow" - so if a slower tier's
+    demo rate also crosses the fast tier's threshold, the fast alert fires
+    first and the demo's own alert gets suppressed instead of routed (see
+    README.md "Simulate an incident" and the acceptance criteria of the
+    issue this guards: only the intended tier's alert should ever reach
+    `firing`-and-routed for a given demo run).
+    """
+    tiers = _script_tiers()
+    thresholds = _tier_threshold_ratios()
+
+    for i, tier in enumerate(TIER_ORDER):
+        incident_rate = float(tiers[tier]["rate"])
+        assert incident_rate > thresholds[tier], (
+            f"{tier}'s INCIDENT_RATE ({incident_rate}) does not even cross "
+            f"its own alert's threshold ({thresholds[tier]})"
+        )
+        for faster_tier in TIER_ORDER[:i]:
+            assert incident_rate <= thresholds[faster_tier], (
+                f"{tier}'s INCIDENT_RATE ({incident_rate}) also crosses "
+                f"{faster_tier}'s threshold ({thresholds[faster_tier]}), so "
+                f"{faster_tier}'s alert would fire first and inhibit {tier}'s "
+                f"alert in Alertmanager, exactly as described in issue #7"
+            )
 
 
 def test_script_resets_to_the_documented_healthy_baseline_on_exit():

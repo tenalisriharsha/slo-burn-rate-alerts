@@ -42,19 +42,19 @@ case "$TIER" in
     ALERT_NAME="SampleServiceErrorBudgetBurnFast"
     ;;
   medium-fast)
-    INCIDENT_RATE="0.1"
+    INCIDENT_RATE="0.01"
     HOLD_SECONDS=1080
     ALERT_FOR="15m"
     ALERT_NAME="SampleServiceErrorBudgetBurnMediumFast"
     ;;
   slow)
-    INCIDENT_RATE="0.05"
+    INCIDENT_RATE="0.0045"
     HOLD_SECONDS=4200
     ALERT_FOR="1h"
     ALERT_NAME="SampleServiceErrorBudgetBurnSlow"
     ;;
   very-slow)
-    INCIDENT_RATE="0.02"
+    INCIDENT_RATE="0.002"
     HOLD_SECONDS=12600
     ALERT_FOR="3h"
     ALERT_NAME="SampleServiceErrorBudgetBurnVerySlow"
